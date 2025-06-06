@@ -1,8 +1,10 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+from typing import Any, Optional, Tuple, Union
+from matplotlib.figure import Figure
 
-def load_csv(file):
+def load_csv(file: Any) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
     """
     Load a CSV file and perform basic validation.
 
@@ -10,7 +12,7 @@ def load_csv(file):
         file: Uploaded file object or file path.
 
     Returns:
-        DataFrame or None: Loaded DataFrame if valid, otherwise None.
+        tuple: (Loaded DataFrame if valid, otherwise None; Error message or None)
     """
     try:
         df = pd.read_csv(file)
@@ -33,15 +35,15 @@ def summarize_numerical(df: pd.DataFrame) -> pd.DataFrame:
     numeric_summary['missing_values'] = df.isna().sum()
     return numeric_summary
 
-def summarize_categorical(df):
+def summarize_categorical(df: pd.DataFrame) -> pd.DataFrame:
     """
     Summarize categorical columns in the DataFrame.
     
     Parameters:
-        df (DataFrame): The DataFrame to summarize.
+        df (pd.DataFrame): The DataFrame to summarize.
     
     Returns:
-        DataFrame: Summary of categorical columns with unique counts and top values.
+        pd.DataFrame: Summary of categorical columns with unique counts and top values.
     """
     categorical_summary = {}
     for col in df.select_dtypes(include='object').columns:
@@ -56,21 +58,21 @@ def summarize_categorical(df):
         }
     return pd.DataFrame(categorical_summary).T
 
-def execute_python_code(code, df):
+def execute_python_code(code: str, df: pd.DataFrame) -> Union[str, Figure]:
     """
     Executes the extracted Python code within the global context and captures any plots.
 
     Parameters:
         code (str): The Python code to execute.
-        df (DataFrame): The dataset to use in execution.
+        df (pd.DataFrame): The dataset to use in execution.
 
     Returns:
-        str or plt.Figure: Execution result or the generated figure.
+        str or Figure: Execution result or the generated figure.
     """
     try:
         # Create a new figure to capture plots
         plt.close("all")  # Clear previous figures
-        exec_globals = {
+        exec_globals: dict[str, Any] = {
             "df": df,  # Pass the DataFrame
             "pd": pd,  # Pandas
             "plt": plt,  # Matplotlib

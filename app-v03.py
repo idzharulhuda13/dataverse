@@ -17,7 +17,7 @@ model = GPT4All(
     allow_download=False
 )
 
-def execute_python_code(code, df):
+def execute_python_code(code: str, df: pd.DataFrame):
     """
     Executes the extracted Python code within a controlled environment.
 
@@ -40,7 +40,7 @@ def execute_python_code(code, df):
         plt.close("all")
 
         # Execution namespace
-        exec_globals = {
+        exec_globals: dict[str, object] = {
             "df": df,  # Pass the original DataFrame
             "pd": pd,  # Pandas
             "plt": plt,  # Matplotlib
