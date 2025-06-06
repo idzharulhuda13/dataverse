@@ -3,8 +3,6 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import re
-import io
-import sys
 
 from gpt4all import GPT4All
 from models.utils import load_csv, summarize_numerical, summarize_categorical, execute_python_code

@@ -3,6 +3,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from typing import Any, Optional, Tuple, Union
 from matplotlib.figure import Figure
+import io
+import sys
 
 def load_csv(file: Any) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
     """
@@ -58,7 +60,10 @@ def summarize_categorical(df: pd.DataFrame) -> pd.DataFrame:
         }
     return pd.DataFrame(categorical_summary).T
 
-def execute_python_code(code: str, df: pd.DataFrame):
+def execute_python_code(
+    code: str, 
+    df: pd.DataFrame
+) -> Tuple[Optional[str], Optional[pd.DataFrame], Optional[Figure]]:
     """
     Executes the extracted Python code within a controlled environment.
 
