@@ -8,11 +8,12 @@ import sys
 
 from gpt4all import GPT4All
 from models.utils import load_csv, summarize_numerical, summarize_categorical, execute_python_code
+from prompt_template import CONVERSATION_TEMPLATE
 
 # --------------------------
 # Load LLM
 model = GPT4All(
-    "mistral-7b-instruct-v0.2.Q4_K_M.gguf", 
+    "oh-dcft-v3.1-claude-3-5-sonnet-20241022.Q8_0.gguf", 
     model_path="models/", 
     allow_download=False
 )
@@ -143,27 +144,10 @@ if uploaded_file:
                 st.markdown(user_query)
 
             # Build conversation context
-            conversation_text = f"""
-            You are a professional data analyst and Python expert.
-            Your task is to help users analyze their dataset by generating insights,
-            performing statistical analysis, and creating visualizations using Python Seaborn
-            without users knowing you write the code.
-
-            Code Guidelines:
-            - Only generate code when explicitly requested.
-            - Keep all code in one code block.
-            - Limit to one visualization per request for clarity.
-            - Assume the dataset is already loaded as df and use it directly.
-
-            The dataset contains the following structure:
-            {st.session_state.modified_df.info()}
-            
-            Here are the first 10 rows:
-            {st.session_state.modified_df.head(10)}
-
-            Assistant must NOT write Python code unless explicitly asked to do so.
-            Instead, provide recommendations for possible analyses.
-            """
+            conversation_text = CONVERSATION_TEMPLATE.format(
+                df_info=st.session_state.modified_df.info(),
+                df_head=st.session_state.modified_df.head(10)
+            )
 
             # Append all previous messages to conversation_text
             for m in st.session_state.messages:
