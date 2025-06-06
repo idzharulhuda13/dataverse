@@ -58,33 +58,53 @@ def summarize_categorical(df: pd.DataFrame) -> pd.DataFrame:
         }
     return pd.DataFrame(categorical_summary).T
 
-def execute_python_code(code: str, df: pd.DataFrame) -> Union[str, Figure]:
+def execute_python_code(code: str, df: pd.DataFrame):
     """
-    Executes the extracted Python code within the global context and captures any plots.
+    Executes the extracted Python code within a controlled environment.
 
     Parameters:
         code (str): The Python code to execute.
-        df (pd.DataFrame): The dataset to use in execution.
+        df (DataFrame): The dataset to use in execution.
 
     Returns:
-        str or Figure: Execution result or the generated figure.
+        tuple: (output_str, final_df, figure)
+            - output_str (str or None): Printed output, if any.
+            - final_df (DataFrame or None): The modified DataFrame if created.
+            - figure (plt.Figure or None): The generated plot, if applicable.
     """
     try:
-        # Create a new figure to capture plots
-        plt.close("all")  # Clear previous figures
-        exec_globals: dict[str, Any] = {
-            "df": df,  # Pass the DataFrame
+        # Capture printed output
+        output_buffer = io.StringIO()
+        sys.stdout = output_buffer  # Redirect stdout to capture print statements
+
+        # Clear previous plots
+        plt.close("all")
+
+        # Execution namespace
+        exec_globals: dict[str, object] = {
+            "df": df,  # Pass the original DataFrame
             "pd": pd,  # Pandas
             "plt": plt,  # Matplotlib
-            "sns": sns  # Seaborn
+            "sns": sns   # Seaborn
         }
-        exec(code, exec_globals)  # Execute the code
-        
-        # Capture the figure
-        fig = plt.gcf()  # Get the current figure
-        if fig.get_axes():  # If the figure has plots
-            return fig  # Return the figure to be displayed
-        else:
-            return "✅ Code executed successfully (No plots detected)."
+
+        # Execute the code
+        exec(code, exec_globals)
+
+        # Restore standard output
+        sys.stdout = sys.__stdout__
+        output_str = output_buffer.getvalue().strip() or None
+
+        # Retrieve 'final_df' if created
+        final_df = exec_globals.get("final_df", None)
+        if final_df is not None and not isinstance(final_df, pd.DataFrame):
+            return "❌ Error: 'final_df' must be a DataFrame.", None, None
+
+        # Capture figure if any plots were created
+        fig = plt.gcf() if plt.get_fignums() else None
+
+        return output_str, final_df, fig
+
     except Exception as e:
-        return f"❌ Error executing code: {str(e)}"
+        sys.stdout = sys.__stdout__  # Restore stdout in case of an error
+        return f"❌ Error executing code: {str(e)}", None, None
