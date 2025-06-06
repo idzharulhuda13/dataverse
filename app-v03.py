@@ -8,7 +8,7 @@ import sys
 
 from gpt4all import GPT4All
 from models.utils import load_csv, summarize_numerical, summarize_categorical, execute_python_code
-from prompt_template import CONVERSATION_TEMPLATE
+from models.prompt_template import CONVERSATION_TEMPLATE
 
 # --------------------------
 # Load LLM
@@ -73,6 +73,11 @@ def execute_python_code(code: str, df: pd.DataFrame):
 # Streamlit App
 st.title("CSV Data Explorer")
 st.write("Upload a CSV file to explore the data.")
+
+# Initialize model generation counter
+if 'generation_count' not in st.session_state:
+    st.session_state.generation_count = 0
+    print("Model generation counter initialized. Current count: 0")
 
 # File uploader
 uploaded_file = st.file_uploader("Choose a CSV file", type="csv")
@@ -156,6 +161,8 @@ if uploaded_file:
                 conversation_text += f"{role}: {content}\n\n"
 
             # Generate assistant response
+            st.session_state.generation_count += 1
+            print(f"Model generation #{st.session_state.generation_count} triggered")
             response = model.generate(conversation_text, max_tokens=2048)
 
             # Extract the response excluding code blocks
