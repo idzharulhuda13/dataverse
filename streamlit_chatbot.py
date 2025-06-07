@@ -8,8 +8,8 @@ import io
 import re
 
 # ── 1. PAGE CONFIG & TITLE ─────────────────────────────────────────────────────
-st.set_page_config(page_title="Local‐GPT4All Chat", layout="centered")
-st.title("Chat with a Local GPT4All Model (using chat_session)")
+st.set_page_config(page_title="Nano-Dataverse", layout="centered")
+st.title("Dataverse - Data Explorer")
 
 # ── 2. CACHE DATAFRAME LOAD & INTROSPECTION ───────────────────────────────────
 # File uploader
@@ -70,7 +70,7 @@ if uploaded_file:
         in_code = False
         def callback(token_id: int, token_string: str) -> bool:
             nonlocal in_code
-            if token_string.find("```") != -1:
+            if token_string.find("```python") != -1:
                 if not in_code:
                     in_code = True
                     return True
