@@ -3,7 +3,7 @@ import streamlit as st
 import pandas as pd
 from gpt4all import GPT4All #type: ignore
 from models.prompt_template import prompt_analyst_template
-from models.utils import execute_python_code, load_csv, make_stop_on_token_callback
+from models.utils import execute_python_code, load_csv, make_stop_on_token_callback_exit_code_block
 import io
 import re
 
@@ -91,7 +91,7 @@ if uploaded_file:
         with st.chat_message("user"):
             st.markdown(prompt)
 
-        reply = st.session_state.session.generate(prompt, callback=make_stop_on_token_callback()) # type: ignore
+        reply = st.session_state.session.generate(prompt, callback=make_stop_on_token_callback_exit_code_block()) # type: ignore
         # Extract all code blocks and remove them from the reply, preserving non-code text
         code_pattern = r'```(?:python)?\n(.*?)\n```'
         response_without_code = re.sub(code_pattern, '', reply, flags=re.DOTALL | re.IGNORECASE).strip()
@@ -105,6 +105,7 @@ if uploaded_file:
         ).strip()
 
         figure = None  # Ensure figure is always defined
+        output_str = None  # Ensure output_str is always defined
 
         with st.chat_message("assistant"):
             st.markdown(response_without_code)
@@ -115,12 +116,13 @@ if uploaded_file:
 
             code_blocks = matches[0].strip() if matches else None
 
-            # print(f"\n\nGenerated codeblock: {code_blocks}")  # Debugging output
             if code_blocks:
+                print(f"\n\nGenerated codeblock: {code_blocks}")  # Debugging output
                 if st.session_state.modified_df is not None:
                     output_str, final_df, fig = execute_python_code(
                         code_blocks, st.session_state.modified_df
                     )
+                    print(f"Output: {output_str}")
                 else:
                     output_str, final_df, fig = "No DataFrame loaded.", None, None
 
@@ -128,9 +130,13 @@ if uploaded_file:
                 if fig:
                     st.pyplot(fig)
                     figure = fig  # Assign to outer variable
+                elif output_str:
+                    st.markdown(f"```\n{output_str}\n```")
 
         # Append assistant message, including figure if present
         assistant_msg = {"role": "assistant", "content": response_without_code}
         if figure is not None:
-            assistant_msg["figure"] = figure # type: ignore
+            assistant_msg["figure"] = figure  # type: ignore
+        elif output_str and output_str.lower() != "no dataframe loaded." and "error" not in output_str.lower():
+            assistant_msg["output"] = output_str  # Save output if not error
         st.session_state.messages.append(assistant_msg)  # type: ignore

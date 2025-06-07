@@ -5,6 +5,7 @@ from typing import Any, Optional, Tuple
 from matplotlib.figure import Figure
 import io
 import sys
+import re
 
 def load_csv(file: Any) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
     """
@@ -114,16 +115,30 @@ def execute_python_code(
         sys.stdout = sys.__stdout__  # Restore stdout in case of an error
         return f"❌ Error executing code: {str(e)}", None, None
 
-def make_stop_on_token_callback():
-    in_code = False
+def make_stop_on_token_callback_exit_code_block():
+    in_code_block = False
+    # Regex to find "```" possibly with some text around it, case-insensitive
+    # re.DOTALL is not needed here as we are looking for the sequence within a single token_string
+    # re.IGNORECASE is useful if "```" could be "```" or "```" (though unlikely for backticks)
+    # The pattern looks for three backticks
+    code_block_delimiter_pattern = re.compile(r"```") 
+
     def callback(token_id: int, token_string: str) -> bool:
-        nonlocal in_code
-        if token_string.find("```") != -1:
-            if not in_code:
-                in_code = True
+        nonlocal in_code_block
+
+        # Use search to find the pattern anywhere in the token_string
+        if code_block_delimiter_pattern.search(token_string):
+            if not in_code_block:
+                # Entering a code block, continue generating
+                in_code_block = True
                 return True
             else:
-                return False
+                # Exiting a code block, stop generation
+                in_code_block = False
+                return False  # Stop generation
+        
+        # If we are inside a code block, continue generation until "```" is found
+        # If we are outside, continue generation until "```" is found
         return True
 
     return callback
