@@ -1,4 +1,4 @@
-.PHONY: help install run clean tunnel all
+.PHONY: help install run clean tunnel all stop
 
 help:
 	@echo "Makefile commands:"
@@ -7,6 +7,7 @@ help:
 	@echo "  clean      Clean up generated files"
 	@echo "  tunnel     Start ngrok tunnel"
 	@echo "  all        Run application and start ngrok tunnel"
+	@echo "  stop       Stop running application and tunnel"
 
 install:
 	pip install -r requirements.txt
@@ -28,3 +29,7 @@ all:
 	@echo "Starting Streamlit application and ngrok tunnel..."
 	@streamlit run streamlit_chatbot.py &
 	@ngrok http 8501
+
+stop:
+	pkill -f streamlit || true
+	pkill -f ngrok || true
