@@ -23,12 +23,12 @@ clean:
 	rm -rf .DS_Store
 
 tunnel:
-	ngrok http 8501
+	ngrok http --domain snail-tough-cowbird.ngrok-free.app 8015
 
 all:
 	@echo "Starting Streamlit application and ngrok tunnel..."
 	@streamlit run streamlit_chatbot.py &
-	@ngrok http 8501
+	@ngrok http --domain snail-tough-cowbird.ngrok-free.app 8501
 
 stop:
 	pkill -f streamlit || true
