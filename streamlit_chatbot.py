@@ -3,7 +3,7 @@ import streamlit as st
 import pandas as pd
 from gpt4all import GPT4All #type: ignore
 from models.prompt_template import prompt_analyst_template
-from models.utils import execute_python_code, load_csv
+from models.utils import execute_python_code, load_csv, make_stop_on_token_callback
 import io
 import re
 
@@ -65,21 +65,6 @@ if uploaded_file:
     if "model" not in st.session_state:
         st.session_state.model = load_model()
 
-    # ── 5. INITIALIZE chat_session (ONCE) ──────────────────────────────────────────
-    def make_stop_on_token_callback():
-        in_code = False
-        def callback(token_id: int, token_string: str) -> bool:
-            nonlocal in_code
-            if token_string.find("```") != -1:
-                if not in_code:
-                    in_code = True
-                    return True
-                else:
-                    return False
-            return True
-
-        return callback
-
     if "session" not in st.session_state:
         cm = st.session_state.model.chat_session(system_prompt=st.session_state.system_prompt)
         st.session_state.session = cm.__enter__()
@@ -107,7 +92,6 @@ if uploaded_file:
             st.markdown(prompt)
 
         reply = st.session_state.session.generate(prompt, callback=make_stop_on_token_callback()) # type: ignore
-        print(f"\n\nGenerated reply: {reply}")  # Debugging output
         # Extract all code blocks and remove them from the reply, preserving non-code text
         code_pattern = r'```(?:python)?\n(.*?)\n```'
         response_without_code = re.sub(code_pattern, '', reply, flags=re.DOTALL | re.IGNORECASE).strip()
@@ -126,26 +110,24 @@ if uploaded_file:
             st.markdown(response_without_code)
 
             # Extract and execute Python code if present
-            code_blocks = [
-                match.group(1)
-                for match in re.finditer(
-                r'```(?:python)?\s*\n(.*?)\n```', reply, re.DOTALL | re.IGNORECASE
-                )
-            ]
-            if code_blocks:
-                for code in code_blocks:
-                    # Execute Python code
-                    if st.session_state.modified_df is not None:
-                        output_str, final_df, fig = execute_python_code(
-                            code, st.session_state.modified_df
-                        )
-                    else:
-                        output_str, final_df, fig = "No DataFrame loaded.", None, None
+            pattern = r'```python(.*?)```'
+            matches = re.findall(pattern, reply, re.DOTALL)
 
-                    # If a figure was generated, attach it to the assistant's message
-                    if fig:
-                        st.pyplot(fig)
-                        figure = fig  # Assign to outer variable
+            code_blocks = matches[0].strip() if matches else None
+
+            # print(f"\n\nGenerated codeblock: {code_blocks}")  # Debugging output
+            if code_blocks:
+                if st.session_state.modified_df is not None:
+                    output_str, final_df, fig = execute_python_code(
+                        code_blocks, st.session_state.modified_df
+                    )
+                else:
+                    output_str, final_df, fig = "No DataFrame loaded.", None, None
+
+                # If a figure was generated, attach it to the assistant's message
+                if fig:
+                    st.pyplot(fig)
+                    figure = fig  # Assign to outer variable
 
         # Append assistant message, including figure if present
         assistant_msg = {"role": "assistant", "content": response_without_code}

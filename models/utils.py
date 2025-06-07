@@ -113,3 +113,17 @@ def execute_python_code(
     except Exception as e:
         sys.stdout = sys.__stdout__  # Restore stdout in case of an error
         return f"❌ Error executing code: {str(e)}", None, None
+
+def make_stop_on_token_callback():
+    in_code = False
+    def callback(token_id: int, token_string: str) -> bool:
+        nonlocal in_code
+        if token_string.find("```") != -1:
+            if not in_code:
+                in_code = True
+                return True
+            else:
+                return False
+        return True
+
+    return callback
