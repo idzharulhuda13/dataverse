@@ -81,7 +81,7 @@ for msg in st.session_state.messages: # type: ignore
     with st.chat_message(msg["role"]): # type: ignore
         st.markdown(msg["content"]) # type: ignore
         if "figure" in msg:
-            st.pyplot(msg["figure"])
+            st.pyplot(msg["figure"]) # type: ignore
 
 if prompt := st.chat_input("Type your question..."):
     st.session_state.messages.append({"role": "user", "content": prompt}) # type: ignore
@@ -122,5 +122,5 @@ if prompt := st.chat_input("Type your question..."):
     # Append assistant message, including figure if present
     assistant_msg = {"role": "assistant", "content": response_without_code}
     if figure is not None:
-        assistant_msg["figure"] = figure
+        assistant_msg["figure"] = figure # type: ignore
     st.session_state.messages.append(assistant_msg)  # type: ignore
