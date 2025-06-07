@@ -12,7 +12,7 @@ install:
 	pip install -r requirements.txt
 
 run:
-	streamlit run app-v03.py
+	streamlit run streamlit_chatbot.py
 
 clean:
 	rm -rf __pycache__
@@ -26,5 +26,5 @@ tunnel:
 
 all:
 	@echo "Starting Streamlit application and ngrok tunnel..."
-	@streamlit run app-v03.py &
+	@streamlit run streamlit_chatbot.py &
 	@ngrok http 8501
