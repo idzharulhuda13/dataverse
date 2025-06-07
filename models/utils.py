@@ -1,7 +1,7 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
-from typing import Any, Optional, Tuple, Union
+from typing import Any, Optional, Tuple
 from matplotlib.figure import Figure
 import io
 import sys
@@ -17,7 +17,7 @@ def load_csv(file: Any) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
         tuple: (Loaded DataFrame if valid, otherwise None; Error message or None)
     """
     try:
-        df = pd.read_csv(file)
+        df = pd.read_csv(file) # type: ignore
 
         if df.empty:
             return None, "The CSV file is empty."
@@ -34,7 +34,7 @@ def load_csv(file: Any) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
 def summarize_numerical(df: pd.DataFrame) -> pd.DataFrame:
     """Return a DataFrame that summarizes each numeric column."""
     numeric_summary = df.select_dtypes(include=["int", "float"]).describe().transpose()
-    numeric_summary['missing_values'] = df.isna().sum()
+    numeric_summary['missing_values'] = df.isna().sum() # type: ignore
     return numeric_summary
 
 def summarize_categorical(df: pd.DataFrame) -> pd.DataFrame:
@@ -50,7 +50,7 @@ def summarize_categorical(df: pd.DataFrame) -> pd.DataFrame:
     categorical_summary = {}
     for col in df.select_dtypes(include='object').columns:
         unique_count = df[col].nunique()
-        top_value = df[col].mode()[0] if not df[col].mode().empty else None
+        top_value = str(df[col].mode()[0]) if not df[col].mode().empty else None # type: ignore
         top_freq = df[col].value_counts().iloc[0] if unique_count > 0 else None
         categorical_summary[col] = {
             'unique_values': unique_count,
