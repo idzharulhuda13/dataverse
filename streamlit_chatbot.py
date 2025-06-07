@@ -70,7 +70,7 @@ if uploaded_file:
         in_code = False
         def callback(token_id: int, token_string: str) -> bool:
             nonlocal in_code
-            if token_string.find("```python") != -1:
+            if token_string.find("```") != -1:
                 if not in_code:
                     in_code = True
                     return True
