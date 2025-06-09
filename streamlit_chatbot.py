@@ -28,8 +28,6 @@ df = None
 if uploaded_file:
     st.cache_data.clear()
     st.cache_resource.clear()
-    for key in list(st.session_state.keys()):
-        del st.session_state[key]
     df, error = load_csv(uploaded_file)
     if df is not None:
         df_info   = get_df_info(df)
