@@ -84,6 +84,8 @@ if uploaded_file:
             st.markdown(msg["content"]) # type: ignore
             if "figure" in msg:
                 st.pyplot(msg["figure"]) # type: ignore
+            elif "output" in msg:
+                st.markdown(msg['output']) # type: ignore
 
     if prompt := st.chat_input("Type your question..."):
         st.session_state.messages.append({"role": "user", "content": prompt}) # type: ignore
@@ -97,40 +99,41 @@ if uploaded_file:
         figure = None  # Initialize figure to ensure it's defined
 
         while retry_count < MAX_RETRIES:
-            generation_input = prompt if output_str is None else (
-                f"The previous code resulted in an error: {output_str}\n"
-                f"Please try again and fix the issue."
-            )
+            with st.spinner("Generating response..." if retry_count == 0 else "Trying again..."):
+                generation_input = prompt if output_str is None else (
+                    f"The previous code resulted in an error: {output_str}\n"
+                    f"Please try again and fix the issue."
+                )
 
-            reply = st.session_state.session.generate(
-                generation_input,
-                callback=make_stop_on_token_callback_exit_code_block()
-            )  # type: ignore
+                reply = st.session_state.session.generate(
+                    generation_input,
+                    callback=make_stop_on_token_callback_exit_code_block()
+                )  # type: ignore
 
-            # Use utility function to extract non-code text
-            response_without_code = extract_non_code_text(reply)
+                # Use utility function to extract non-code text
+                response_without_code = extract_non_code_text(reply)
 
-            # Extract and execute Python code if present
-            code_blocks = extract_python_code_blocks(reply)
-            code_block = code_blocks[0] if code_blocks else None
+                # Extract and execute Python code if present
+                code_blocks = extract_python_code_blocks(reply)
+                code_block = code_blocks[0] if code_blocks else None
 
-            output_str = None  # Ensure output_str is always defined
+                output_str = None  # Ensure output_str is always defined
 
-            if code_block:
-                print(f"\n\nGenerated codeblock: {code_block}")  # Debugging output
-                if st.session_state.modified_df is not None:
-                    output_str, final_df, figure = execute_python_code(
-                        code_block, st.session_state.modified_df
-                    )
-                    print(f"Output: {output_str}")
+                if code_block:
+                    print(f"\n\nGenerated codeblock: {code_block}")  # Debugging output
+                    if st.session_state.modified_df is not None:
+                        output_str, final_df, figure = execute_python_code(
+                            code_block, st.session_state.modified_df
+                        )
+                        print(f"Output: {output_str}")
+                    else:
+                        output_str, final_df, figure = "No DataFrame loaded.", None, None
+
+                if output_str and "error executing code" in output_str.lower():
+                    retry_count += 1
+                    print(f"Retry {retry_count} due to error...")
                 else:
-                    output_str, final_df, figure = "No DataFrame loaded.", None, None
-
-            if output_str and "error executing code" in output_str.lower():
-                retry_count += 1
-                print(f"Retry {retry_count} due to error...")
-            else:
-                break  # Exit loop if there's no error
+                    break  # Exit loop if there's no error
 
 
         with st.chat_message("assistant"):
