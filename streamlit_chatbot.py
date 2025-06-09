@@ -3,7 +3,7 @@ import streamlit as st
 import pandas as pd
 from gpt4all import GPT4All #type: ignore
 from models.prompt_template import prompt_analyst_template
-from models.utils import execute_python_code, load_csv, make_stop_on_token_callback_exit_code_block
+from models.utils import execute_python_code, load_csv, make_stop_on_token_callback_exit_code_block, extract_non_code_text, extract_python_code_blocks
 import io
 import re
 
@@ -91,47 +91,56 @@ if uploaded_file:
         with st.chat_message("user"):
             st.markdown(prompt)
 
-        reply = st.session_state.session.generate(prompt, callback=make_stop_on_token_callback_exit_code_block()) # type: ignore
-        # Extract all code blocks and remove them from the reply, preserving non-code text
-        code_pattern = r'```(?:python)?\n(.*?)\n```'
-        response_without_code = re.sub(code_pattern, '', reply, flags=re.DOTALL | re.IGNORECASE).strip()
-        # Remove 'responding://' from the response
-        # Remove 'responding://' and similar patterns from the response using regex
-        response_without_code = re.sub(
-            r'(```)?responding://(```)?|<\|end_of_text\|><\|begin_of_text\|>://', 
-            '', 
-            response_without_code, 
-            flags=re.IGNORECASE
-        ).strip()
+        MAX_RETRIES = 2
+        retry_count = 0
+        output_str = None  # Initialize output_str to ensure it's defined
+        response_without_code = ""
+        figure = None  # Initialize figure to ensure it's defined
 
-        figure = None  # Ensure figure is always defined
-        output_str = None  # Ensure output_str is always defined
+        while retry_count < MAX_RETRIES:
+            generation_input = prompt if output_str is None else (
+                f"The previous code resulted in an error: {output_str}\n"
+                f"Please try again and fix the issue."
+            )
+
+            reply = st.session_state.session.generate(
+                generation_input,
+                callback=make_stop_on_token_callback_exit_code_block()
+            )  # type: ignore
+
+            # Use utility function to extract non-code text
+            response_without_code = extract_non_code_text(reply)
+
+            # Extract and execute Python code if present
+            code_blocks = extract_python_code_blocks(reply)
+            code_block = code_blocks[0] if code_blocks else None
+
+            output_str = None  # Ensure output_str is always defined
+
+            if code_block:
+                print(f"\n\nGenerated codeblock: {code_block}")  # Debugging output
+                if st.session_state.modified_df is not None:
+                    output_str, final_df, figure = execute_python_code(
+                        code_block, st.session_state.modified_df
+                    )
+                    print(f"Output: {output_str}")
+                else:
+                    output_str, final_df, figure = "No DataFrame loaded.", None, None
+
+            if output_str and "error executing code" in output_str.lower():
+                retry_count += 1
+                print(f"Retry {retry_count} due to error...")
+            else:
+                break  # Exit loop if there's no error
+
 
         with st.chat_message("assistant"):
             st.markdown(response_without_code)
 
-            # Extract and execute Python code if present
-            pattern = r'```python(.*?)```'
-            matches = re.findall(pattern, reply, re.DOTALL)
-
-            code_blocks = matches[0].strip() if matches else None
-
-            if code_blocks:
-                print(f"\n\nGenerated codeblock: {code_blocks}")  # Debugging output
-                if st.session_state.modified_df is not None:
-                    output_str, final_df, fig = execute_python_code(
-                        code_blocks, st.session_state.modified_df
-                    )
-                    print(f"Output: {output_str}")
-                else:
-                    output_str, final_df, fig = "No DataFrame loaded.", None, None
-
-                # If a figure was generated, attach it to the assistant's message
-                if fig:
-                    st.pyplot(fig)
-                    figure = fig  # Assign to outer variable
-                elif output_str:
-                    st.markdown(f"```\n{output_str}\n```")
+            if figure:
+                st.pyplot(figure)
+            elif output_str:
+                st.markdown(f"```\n{output_str}\n```")
 
         # Append assistant message, including figure if present
         assistant_msg = {"role": "assistant", "content": response_without_code}
