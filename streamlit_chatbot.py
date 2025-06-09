@@ -5,7 +5,6 @@ from gpt4all import GPT4All #type: ignore
 from models.prompt_template import prompt_analyst_template
 from models.utils import execute_python_code, load_csv, make_stop_on_token_callback_exit_code_block, extract_non_code_text, extract_python_code_blocks
 import io
-import re
 
 # ── 1. PAGE CONFIG & TITLE ─────────────────────────────────────────────────────
 st.set_page_config(page_title="Nano-Dataverse", layout="centered")
