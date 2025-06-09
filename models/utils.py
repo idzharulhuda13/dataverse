@@ -121,7 +121,7 @@ def make_stop_on_token_callback_exit_code_block():
     # re.DOTALL is not needed here as we are looking for the sequence within a single token_string
     # re.IGNORECASE is useful if "```" could be "```" or "```" (though unlikely for backticks)
     # The pattern looks for three backticks
-    code_block_delimiter_pattern = re.compile(r"```") 
+    code_block_delimiter_pattern = re.compile(r"```python") 
 
     def callback(token_id: int, token_string: str) -> bool:
         nonlocal in_code_block
@@ -142,3 +142,27 @@ def make_stop_on_token_callback_exit_code_block():
         return True
 
     return callback
+
+def extract_non_code_text(reply: str) -> str:
+    """
+    Extract all code blocks and remove them from the reply, preserving non-code text.
+    Also removes 'responding://' and similar patterns from the response.
+    """
+    code_pattern = r'```(?:python)?\n(.*?)\n```'
+    response_without_code = re.sub(code_pattern, '', reply, flags=re.DOTALL | re.IGNORECASE).strip()
+    response_without_code = re.sub(
+        r'(```)?responding://(```)?|<\|end_of_text\|><\|begin_of_text\|>://|```python',
+        '',
+        response_without_code,
+        flags=re.IGNORECASE
+    ).strip()
+    return response_without_code
+
+def extract_python_code_blocks(reply: str) -> list[str]:
+    """
+    Extract all Python code blocks from a string reply.
+    Returns a list of code block strings (without the triple backticks and 'python').
+    """
+    pattern = r'```python\n(.*?)\n```'
+    matches = re.findall(pattern, reply, re.DOTALL)
+    return [m.strip() for m in matches]
