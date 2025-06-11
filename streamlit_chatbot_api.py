@@ -74,8 +74,8 @@ if uploaded_file:
             st.markdown(msg["content"]) # type: ignore
             if "figure" in msg:
                 st.pyplot(msg["figure"]) # type: ignore
-            elif "output" in msg:
-                st.markdown(msg['output']) # type: ignore
+            if "output" in msg:
+                st.markdown(f"```\n{msg['output']}\n```") # type: ignore
 
     if prompt := st.chat_input("Type your question..."):
         st.session_state.messages.append({"role": "user", "content": prompt}) # type: ignore
@@ -106,9 +106,13 @@ if uploaded_file:
             st.markdown(response_without_code)
             if figure:
                 st.pyplot(figure)
+            if output_str:
+                st.markdown(f"```\n{output_str}\n```")
             
         assistant_msg = {"role": "assistant", "content": response_without_code}
         if figure is not None:
             assistant_msg["figure"] = figure  # type: ignore
+        if output_str is not None:
+            assistant_msg["output"] = output_str # type: ignore
 
         st.session_state.messages.append(assistant_msg) # type: ignore
