@@ -4,11 +4,11 @@ import streamlit as st
 import pandas as pd
 from google import genai
 from google.genai import types
-from models.prompt_template import prompt_analyst_template
+from models.prompt_template import prompt_seaborn_analyst
 from models.utils import load_csv, extract_non_code_text, extract_python_code_blocks, execute_python_code
+import dotenv
 
-api_key = os.getenv("GEMINI_API_KEY")
-model = "gemini-2.5-flash-preview-05-20"
+dotenv.load_dotenv()
 
 st.set_page_config(page_title="Nano-Dataverse", layout="centered")
 st.title("Dataverse - Data Explorer")
@@ -43,12 +43,20 @@ if uploaded_file:
             st.session_state.modified_df = df.copy()
         else:
             st.session_state.modified_df = None
+    
+    api_key = os.getenv("GEMINI_API_KEY")
+    model = os.getenv("GEMINI_MODEL")
+    if not api_key:
+        raise ValueError("Missing GEMINI_API_KEY environment variable.")
+    if not model:
+        raise ValueError("Missing GEMINI_MODEL environment variable.")
+
     if "client" not in st.session_state:
         st.session_state.client = genai.Client(api_key=api_key)
     if "chat" not in st.session_state:
         st.session_state.chat = st.session_state.client.chats.create(
             model=model,
-            config=types.GenerateContentConfig(system_instruction=prompt_analyst_template.format(
+            config=types.GenerateContentConfig(system_instruction=prompt_seaborn_analyst.format(
                 df_info=df_info,
                 df_head=df_head
             ))
