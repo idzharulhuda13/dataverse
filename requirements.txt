@@ -3,3 +3,6 @@ pandas
 matplotlib
 seaborn
 gpt4all
+python-dotenv
+google-genai
+prophet
