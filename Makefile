@@ -13,7 +13,7 @@ install:
 	pip install -r requirements.txt
 
 run:
-	streamlit run streamlit_chatbot.py
+	streamlit run streamlit_chatbot_api.py
 
 clean:
 	rm -rf __pycache__
@@ -27,7 +27,7 @@ tunnel:
 
 all:
 	@echo "Starting Streamlit application and ngrok tunnel..."
-	@streamlit run streamlit_chatbot.py &
+	@streamlit run streamlit_chatbot_api.py &
 	@ngrok http --domain snail-tough-cowbird.ngrok-free.app 8501
 
 stop:
