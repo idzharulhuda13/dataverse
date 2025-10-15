@@ -61,3 +61,5 @@ build/
 # ai model
 models/*.gguf
 data/private
+secrets.toml
+.streamlit
