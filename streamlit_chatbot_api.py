@@ -1,14 +1,10 @@
 import io
-import os
 import streamlit as st
 import pandas as pd
 from google import genai
 from google.genai import types
 from models.prompt_template import prompt_seaborn_analyst
 from models.utils import load_csv, extract_non_code_text, extract_python_code_blocks, execute_python_code
-import dotenv
-
-dotenv.load_dotenv()
 
 st.set_page_config(page_title="Nano-Dataverse", layout="centered")
 st.title("Dataverse - Data Explorer")
@@ -44,8 +40,8 @@ if uploaded_file:
         else:
             st.session_state.modified_df = None
     
-    api_key = os.getenv("GEMINI_API_KEY")
-    model = os.getenv("GEMINI_MODEL")
+    api_key = st.secrets["GEMINI_API_KEY"]
+    model = st.secrets["GEMINI_MODEL"]
     if not api_key:
         raise ValueError("Missing GEMINI_API_KEY environment variable.")
     if not model:
