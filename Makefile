@@ -10,10 +10,10 @@ help:
 	@echo "  stop       Stop running application and tunnel"
 
 install:
-	pip install -r requirements.txt
+	uv sync
 
 run:
-	streamlit run streamlit_chatbot_api.py
+	uv run streamlit run streamlit_chatbot_api.py
 
 clean:
 	rm -rf __pycache__
@@ -21,6 +21,9 @@ clean:
 	rm -rf .coverage
 	rm -rf *.pyc
 	rm -rf .DS_Store
+	rm -rf .venv
+	rm -rf deprecated
+	rm -rf "demo video"
 
 tunnel:
 	ngrok http --domain snail-tough-cowbird.ngrok-free.app 8015
