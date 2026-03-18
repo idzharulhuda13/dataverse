@@ -59,26 +59,19 @@ This application allows users to upload a **CSV file** and then communicate with
 
 ---
 
-##  Project Structure
-
-```sh
 └── dataverse/
+    ├── .python-version
     ├── Makefile
-    ├── data
+    ├── data/
     │   ├── Sales Funnel.csv
     │   └── check csv dataviz - Sheet1.csv
-    ├── deprecated
-    │   ├── app-v01.py
-    │   ├── app-v02.py
-    │   ├── app-v03.py
-    │   └── back to basic.ipynb
-    ├── models
+    ├── models/
     │   ├── prompt_template.py
     │   └── utils.py
-    ├── requirements.txt
+    ├── pyproject.toml
     ├── streamlit_chatbot.py
-    └── streamlit_chatbot_api.py
-```
+    ├── streamlit_chatbot_api.py
+    └── uv.lock
 
 ---
 ##  Getting Started
@@ -87,8 +80,8 @@ This application allows users to upload a **CSV file** and then communicate with
 
 Before getting started with dataverse, ensure your runtime environment meets the following requirements:
 
-- **Programming Language:** Python
-- **Package Manager:** Pip
+- **Programming Language:** Python (>=3.11)
+- **Package Manager:** [uv](https://docs.astral.sh/uv/) (Recommended)
 
 
 ###  Installation
@@ -110,10 +103,10 @@ Install dataverse using one of the following methods:
 3. Install the project dependencies:
 
 
-**Using `pip`** &nbsp; [<img align="center" src="https://img.shields.io/badge/Pip-3776AB.svg?style={badge_style}&logo=pypi&logoColor=white" />](https://pypi.org/project/pip/)
+**Using `uv`** &nbsp; [![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
 
 ```sh
-❯ pip install -r requirements.txt
+❯ uv sync
 ```
 
 
@@ -125,5 +118,5 @@ Run dataverse using the following command:
 
 
 ```sh
-❯ streamlit run streamlit_chatbot_api.py
+❯ uv run streamlit run streamlit_chatbot_api.py
 ```
