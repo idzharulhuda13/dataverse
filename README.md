@@ -59,6 +59,9 @@ This application allows users to upload a **CSV file** and then communicate with
 
 ---
 
+##  Project Structure
+
+```sh
 └── dataverse/
     ├── .python-version
     ├── Makefile
@@ -72,6 +75,7 @@ This application allows users to upload a **CSV file** and then communicate with
     ├── streamlit_chatbot.py
     ├── streamlit_chatbot_api.py
     └── uv.lock
+```
 
 ---
 ##  Getting Started
