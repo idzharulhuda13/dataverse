@@ -11,6 +11,26 @@ st.set_page_config(page_title="DataVerse - Dashboard Generation", layout="wide")
 
 st.title("DataVerse - Agent Dashboard Generation")
 
+import time
+from google.genai.errors import ServerError
+
+def safe_chat_send(chat, payload, max_retries=3):
+    """Small wrapper to handle 503 demand spikes gracefully."""
+    for attempt in range(max_retries):
+        try:
+            return chat.send_message(payload)
+        except ServerError as e:
+            if "503" in str(e) and attempt < max_retries - 1:
+                st.warning(f"⚠️ Model is busy (503). Retrying in {2**attempt}s...")
+                time.sleep(2**attempt)
+            else:
+                st.error(f"❌ Gemini API Error: {str(e)}")
+                return None
+        except Exception as e:
+            st.error(f"❌ Unexpected error: {str(e)}")
+            return None
+    return None
+
 # ── 1. SESSION STATE INIT ────────────────────────────────────────────────────────
 if "dashboard_items" not in st.session_state:
     st.session_state.dashboard_items = []
@@ -53,7 +73,8 @@ with chat_col:
         )
 
     if "messages" not in st.session_state: # type: ignore
-        initial_msg = st.session_state.chat.send_message("Please introduce yourself and offer to help analyze the data.").text
+        resp = safe_chat_send(st.session_state.chat, "Please introduce yourself and offer to help analyze the data.")
+        initial_msg = resp.text if resp else "I am your DataVerse Analyst. Let's explore your data!"
         st.session_state.messages = [{"role": "assistant", "content": initial_msg}]
 
     # Render previous chat history
@@ -116,7 +137,11 @@ with chat_col:
             st.markdown(user_text)
 
         with st.spinner("Agent is thinking..."):
-            response = st.session_state.chat.send_message(llm_prompt)
+            response = safe_chat_send(st.session_state.chat, llm_prompt)
+            if not response:
+                st.session_state.messages.pop() # remove the user message if no response
+                st.stop()
+            
             print("Usage summary:", getattr(response, "usage_metadata", "N/A"))
 
             response_without_code = extract_non_code_text(response.text or "")
@@ -145,8 +170,8 @@ with chat_col:
                 
                 with st.spinner("Analyzing chart insights..."):
                     insight_prompt = "Here is the chart you just generated. Please provide a concise, data-driven insight (1-2 paragraphs) explicitly stating what this chart reveals (e.g., trends, spikes, correlations, or key takeaways). Do not explain how you made the chart, just focus on the business or data insights."
-                    insight_response = st.session_state.chat.send_message([insight_prompt, img])
-                    insight_text = extract_non_code_text(insight_response.text or "")
+                    insight_response = safe_chat_send(st.session_state.chat, [insight_prompt, img])
+                    insight_text = extract_non_code_text(insight_response.text if insight_response else "")
 
             # Save into session state BEFORE rendering so that button reruns don't lose the msg
             assistant_msg = {
