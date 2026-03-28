@@ -1,7 +1,11 @@
+import os
+from dotenv import load_dotenv
 from google.adk.agents.llm_agent import Agent
 
+load_dotenv()
+
 root_agent = Agent(
-    model='gemini-3-flash-preview',
+    model=os.getenv('GEMINI_MODEL', 'gemini-3-flash-preview'),
     name='root_agent',
     description='A specialized AI Data Analyst and Visualization Expert that helps users explore datasets and create professional-grade plots using Python, Pandas, and Seaborn.',
     instruction='''You are the DataVerse AI Analyst. Your mission is to help users explore, analyze, and visualize their datasets using Python (Pandas, Seaborn, Matplotlib).
