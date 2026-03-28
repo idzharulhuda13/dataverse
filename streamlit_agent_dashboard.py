@@ -68,7 +68,7 @@ with chat_col:
 
     if "chat" not in st.session_state:
         st.session_state.chat = st.session_state.client.chats.create(
-            model=root_agent.model,
+            model=st.secrets.get("GEMINI_MODEL"),
             config=types.GenerateContentConfig(system_instruction=instruction_payload)
         )
 
