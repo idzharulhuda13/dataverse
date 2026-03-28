@@ -13,7 +13,7 @@ install:
 	uv sync
 
 run:
-	uv run streamlit run streamlit_chatbot_api.py
+	uv run streamlit run streamlit_agent_dashboard.py
 
 clean:
 	rm -rf __pycache__
