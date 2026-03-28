@@ -63,15 +63,20 @@ This application allows users to upload a **CSV file** and then communicate with
 
 ```sh
 └── dataverse/
+    ├── .adk/
     ├── .python-version
     ├── Makefile
     ├── data/
     │   ├── Sales Funnel.csv
     │   └── check csv dataviz - Sheet1.csv
+    ├── dataverse_agent/
+    │   ├── __init__.py
+    │   └── agent.py
     ├── models/
     │   ├── prompt_template.py
     │   └── utils.py
     ├── pyproject.toml
+    ├── streamlit_agent_dashboard.py
     ├── streamlit_chatbot.py
     ├── streamlit_chatbot_api.py
     └── uv.lock
@@ -117,10 +122,11 @@ Install dataverse using one of the following methods:
 
 
 ###  Usage
-Run dataverse using the following command:
+Run the AI-powered agent dashboard using the following command:
+
 **Using `streamlit`** &nbsp; [![Streamlit](https://img.shields.io/badge/-Streamlit-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white)](https://streamlit.io/)
 
 
 ```sh
-❯ uv run streamlit run streamlit_chatbot_api.py
+❯ uv run streamlit run streamlit_agent_dashboard.py
 ```
