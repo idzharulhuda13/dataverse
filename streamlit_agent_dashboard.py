@@ -357,10 +357,13 @@ with chat_col:
 
                 with st.spinner("Analyzing chart insights..."):
                     insight_prompt = (
-                        "Here is the chart you just generated. Please provide a concise, "
-                        "data-driven insight (1-2 paragraphs) explicitly stating what this chart "
-                        "reveals (e.g., trends, spikes, correlations, or key takeaways). "
-                        "Do not explain how you made the chart, just focus on the business or data insights."
+                        "You are looking at the chart you just generated. Provide a focused data insight using this framework:\n\n"
+                        "**📊 Observation:** What specific patterns, trends, outliers, or distributions do you see? Be precise — cite numbers, percentages, or rankings where possible.\n\n"
+                        "**💡 Interpretation:** Why does this matter? What business or practical implication does this pattern suggest? "
+                        "Consider: Is there a concentration risk? A growth opportunity? An anomaly that needs investigation? A seasonal effect?\n\n"
+                        "Keep it concise (2-4 sentences total). Be specific — avoid generic statements like 'the data shows interesting patterns'. "
+                        "If you spot something surprising or counterintuitive, lead with that. "
+                        "Do NOT suggest follow-up analyses or next steps here — focus purely on what the chart reveals."
                     )
                     insight_response = safe_chat_send(st.session_state.chat, [insight_prompt, img])
                     insight_text = extract_non_code_text(
