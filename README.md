@@ -43,18 +43,33 @@ This application allows users to upload a **CSV file** and then communicate with
 ### Conversational Data Analysis
 * **AI Analyst Chat Interface:** Engage with a powerful chat assistant to ask natural language questions about your data.
 * **Context-Aware Responses:** The AI is initialized with your DataFrame's structure to provide relevant and precise suggestions from the start.
-* **Persistent Chat History:** Maintains the full history of the conversation within the Streamlit session.
+* **Randomized Welcome Messages:** Every new session greets you with a unique, randomized welcome message for a fresh experience.
+* **CSV Upload Guard:** The agent enforces uploading a CSV file before any analysis can begin, ensuring data is always present before queries.
+
+### Session Management
+* **Persistent Chat Sessions:** Create and switch between multiple independent chat sessions — each with its own conversation history, uploaded dataset, and pinned dashboard items.
+* **Session Sidebar:** The sidebar lists all sessions, showing creation time, message count, and data status at a glance.
+* **Session Resume Messages:** When you switch back to a previous session, the agent greets you with a contextual "welcome back" message.
+* **Rename Sessions:** Customize the name of any active session directly from the sidebar.
+* **Delete Sessions:** Remove any non-active session with a single click (keeping at least one session always active).
+* **Auto-Save:** Session state is automatically saved after every message exchange.
 
 ### Code Execution & Visualization
 * **Intelligent Code Generation:** The AI assistant generates **Python code snippets** (primarily for data manipulation with **Pandas** and visualization with **Seaborn** or **Matplotlib**) in response to user prompts.
 * **Secure In-App Execution:** The generated code is automatically executed against the active DataFrame in the Streamlit environment.
 * **Live Visualization:** Automatically displays generated **Seaborn/Matplotlib plots** directly in the chat thread.
+* **Chart Insights (Second Pass):** After each chart is generated, the agent performs a second AI pass to provide concise, data-driven business insights extracted from the visualization.
 * **Code and Output Display:** Shows both the **plain-text response** from the AI *and* the actual **execution output** (or errors) in code blocks for full transparency.
 
+### Dashboard Pinning
+* **Pin to Dashboard:** Any generated visualization can be pinned to a live dashboard panel displayed alongside the chat.
+* **2-Column Dashboard Layout:** Pinned charts are arranged in a responsive 2-column grid with insights attached.
+* **Remove from Dashboard:** Easily remove pinned items directly from the dashboard view.
+
 ### Data Management & Tech Stack
-* **Simple CSV Upload:** Easily upload your data using Streamlit's file uploader.
-* **Efficient Caching:** Utilizes Streamlit's caching to efficiently manage and load the DataFrame.
+* **CSV Upload via Chat Input:** Upload your dataset directly within the chat input box for a seamless workflow.
 * **Data Isolation:** Maintains a separate copy of the DataFrame for safe code execution.
+* **Graceful API Error Handling:** Auto-retries on Gemini 503 demand-spike errors with exponential backoff.
 * **Core Technologies:** Built on **Streamlit**, **Google Gemini API**, and **Pandas**.
 
 ---
@@ -71,12 +86,13 @@ This application allows users to upload a **CSV file** and then communicate with
     │   └── check csv dataviz - Sheet1.csv
     ├── dataverse_agent/
     │   ├── __init__.py
-    │   └── agent.py
+    │   ├── agent.py
+    │   └── messages.py          ← Centralized chat messages (intro, no-csv, session-resume)
     ├── models/
     │   ├── prompt_template.py
     │   └── utils.py
     ├── pyproject.toml
-    ├── streamlit_agent_dashboard.py
+    ├── streamlit_agent_dashboard.py   ← Main AI-powered agent dashboard
     ├── streamlit_chatbot.py
     ├── streamlit_chatbot_api.py
     └── uv.lock
@@ -91,6 +107,7 @@ Before getting started with dataverse, ensure your runtime environment meets the
 
 - **Programming Language:** Python (>=3.11)
 - **Package Manager:** [uv](https://docs.astral.sh/uv/) (Recommended)
+- **API Key:** A valid [Google Gemini API key](https://aistudio.google.com/apikey)
 
 
 ###  Installation
@@ -118,10 +135,15 @@ Install dataverse using one of the following methods:
 ❯ uv sync
 ```
 
-
+4. Set up your Streamlit secrets by creating `.streamlit/secrets.toml`:
+```toml
+GEMINI_API_KEY = "your-gemini-api-key"
+GEMINI_MODEL   = "your-preferred-gemini-model"
+```
 
 
 ###  Usage
+
 Run the AI-powered agent dashboard using the following command:
 
 **Using `streamlit`** &nbsp; [![Streamlit](https://img.shields.io/badge/-Streamlit-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white)](https://streamlit.io/)
@@ -129,4 +151,19 @@ Run the AI-powered agent dashboard using the following command:
 
 ```sh
 ❯ uv run streamlit run streamlit_agent_dashboard.py
+```
+
+Or use the provided **Makefile** for convenience:
+
+| Command        | Description                                      |
+|----------------|--------------------------------------------------|
+| `make install` | Install all project dependencies via `uv sync`   |
+| `make run`     | Run the Streamlit agent dashboard                |
+| `make clean`   | Remove cache, build artifacts, and `.venv`       |
+| `make tunnel`  | Start an ngrok tunnel (fixed domain)             |
+| `make all`     | Run the chatbot API app and start ngrok tunnel   |
+| `make stop`    | Stop all running Streamlit and ngrok processes   |
+
+```sh
+❯ make run
 ```
