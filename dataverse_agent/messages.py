@@ -20,3 +20,11 @@ NO_CSV_MESSAGES = [
     "🗂️ No dataset detected. Drop a CSV file in the chat and I'll get right on it!",
     "📎 Before I can help, I'll need some data. Please upload a CSV file to continue.",
 ]
+
+SESSION_RESUMED_MESSAGES = [
+    "👋 Welcome back! Let's pick up right where we left off.",
+    "🔄 Session restored! Your previous data and conversation are ready.",
+    "📂 Back to this session — all your history is intact. How can I help?",
+    "✨ Resumed! Your charts and data are still here. What's next?",
+    "🎯 Session loaded successfully. Ready to continue the analysis!",
+]
