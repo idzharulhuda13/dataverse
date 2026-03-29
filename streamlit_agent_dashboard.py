@@ -1,4 +1,5 @@
 import io
+import random
 import streamlit as st
 import pandas as pd
 from google import genai
@@ -6,6 +7,7 @@ from google.genai import types
 
 from models.utils import load_csv, extract_non_code_text, extract_python_code_blocks, execute_python_code
 from dataverse_agent.agent import root_agent
+from dataverse_agent.messages import INTRO_MESSAGES, NO_CSV_MESSAGES
 
 st.set_page_config(page_title="DataVerse - Dashboard Generation", layout="wide")
 
@@ -73,8 +75,7 @@ with chat_col:
         )
 
     if "messages" not in st.session_state: # type: ignore
-        resp = safe_chat_send(st.session_state.chat, "Please introduce yourself and offer to help analyze the data.")
-        initial_msg = resp.text if resp else "I am your DataVerse Analyst. Let's explore your data!"
+        initial_msg = random.choice(INTRO_MESSAGES)
         st.session_state.messages = [{"role": "assistant", "content": initial_msg}]
 
     # Render previous chat history
@@ -130,6 +131,12 @@ with chat_col:
 
         # The actual prompt we send to the LLM
         llm_prompt = user_text + append_data_context
+
+        # Guard: if no dataset is loaded yet, ask the user to upload a CSV first
+        if st.session_state.modified_df is None and not uploaded_files:
+            st.session_state.messages.append({"role": "user", "content": user_text}) # type: ignore
+            st.session_state.messages.append({"role": "assistant", "content": random.choice(NO_CSV_MESSAGES)}) # type: ignore
+            st.rerun()
 
         # Add only the user's text to the visible UI history
         st.session_state.messages.append({"role": "user", "content": user_text}) # type: ignore
