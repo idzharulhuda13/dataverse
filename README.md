@@ -22,6 +22,7 @@
 
 - [ Overview](#overview)
 - [ Features](#features)
+- [ Security & Sandboxing](#security--sandboxing)
 - [ Project Structure](#project-structure)
 - [ Getting Started](#getting-started)
   - [ Prerequisites](#prerequisites)
@@ -56,7 +57,11 @@ This application allows users to upload a **CSV file** and then communicate with
 
 ### Code Execution & Visualization
 * **Intelligent Code Generation:** The AI assistant generates **Python code snippets** (primarily for data manipulation with **Pandas** and visualization with **Seaborn** or **Matplotlib**) in response to user prompts.
-* **Secure In-App Execution:** The generated code is automatically executed against the active DataFrame in the Streamlit environment.
+* **4-Layer Sandboxed Execution:** Generated code is executed within a **secure sandbox** that features:
+    * **AST Static Analysis:** Pre-screens code for malicious patterns before execution.
+    * **Gated Imports:** Restricts runtime imports to only safe analytics libraries (pandas, numpy, seaborn, etc.).
+    * **Restricted Namespace:** Blocks dangerous built-ins like `eval`, `exec`, and `open`.
+    * **Resource Control:** Implements a 30-second execution timeout and output truncation.
 * **Live Visualization:** Automatically displays generated **Seaborn/Matplotlib plots** directly in the chat thread.
 * **Chart Insights (Second Pass):** After each chart is generated, the agent performs a second AI pass to provide concise, data-driven business insights extracted from the visualization.
 * **Code and Output Display:** Shows both the **plain-text response** from the AI *and* the actual **execution output** (or errors) in code blocks for full transparency.
@@ -71,6 +76,19 @@ This application allows users to upload a **CSV file** and then communicate with
 * **Data Isolation:** Maintains a separate copy of the DataFrame for safe code execution.
 * **Graceful API Error Handling:** Auto-retries on Gemini 503 demand-spike errors with exponential backoff.
 * **Core Technologies:** Built on **Streamlit**, **Google Gemini API**, and **Pandas**.
+
+---
+
+## 🛡️  Security & Sandboxing
+
+The DataVerse agent prioritizes security by running all LLM-generated Python code through a multi-layered sandbox located in `models/sandbox.py`.
+
+*   **Layer 1 (Blocklists):** Hard-coded rejection of 20+ dangerous modules (os, subprocess, socket) and built-ins (exec, eval, open).
+*   **Layer 2 (AST Analysis):** Uses Python's Abstract Syntax Tree (AST) to statically analyze code before it ever runs, catching dunder attribute escapes and hidden `__import__` calls.
+*   **Layer 3 (Gated Namespace):** Provides a restricted execution environment where only whitelisted analytics libraries are accessible.
+*   **Layer 4 (Resource Limits):** A dedicated thread-based timeout (30s) prevents infinite loops or resource exhaustion from crashing the app.
+
+Any attempt to bypass these restrictions results in a `🛡️ Code blocked` alert in the chat.
 
 ---
 
@@ -89,8 +107,13 @@ This application allows users to upload a **CSV file** and then communicate with
     │   ├── agent.py
     │   └── messages.py          ← Centralized chat messages (intro, no-csv, session-resume)
     ├── models/
+    │   ├── __init__.py
     │   ├── prompt_template.py
+    │   ├── sandbox.py           ← The 4-layer Python execution sandbox
     │   └── utils.py
+    ├── tests/
+    │   ├── __init__.py
+    │   └── test_sandbox.py      ← Comprehensive security test suite
     ├── pyproject.toml
     ├── streamlit_agent_dashboard.py   ← Main AI-powered agent dashboard
     ├── streamlit_chatbot.py
