@@ -7,6 +7,8 @@ import io
 import sys
 import re
 
+from models.sandbox import safe_execute
+
 def load_csv(file: Any) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
     """
     Load a CSV file and perform basic validation.
@@ -66,7 +68,7 @@ def execute_python_code(
     df: pd.DataFrame
 ) -> Tuple[Optional[str], Optional[pd.DataFrame], Optional[Figure]]:
     """
-    Executes the extracted Python code within a controlled environment.
+    Executes the extracted Python code within a sandboxed environment.
 
     Parameters:
         code (str): The Python code to execute.
@@ -78,42 +80,14 @@ def execute_python_code(
             - final_df (DataFrame or None): The modified DataFrame if created.
             - figure (plt.Figure or None): The generated plot, if applicable.
     """
-    try:
-        # Capture printed output
-        output_buffer = io.StringIO()
-        sys.stdout = output_buffer  # Redirect stdout to capture print statements
+    result = safe_execute(code, df)
 
-        # Clear previous plots
-        plt.close("all")
+    if result.blocked:
+        return f"🛡️ Code blocked: {result.blocked_reason}", None, None
+    if result.error:
+        return f"❌ Error executing code: {result.error}", None, None
 
-        # Execution namespace
-        exec_globals: dict[str, object] = {
-            "df": df,  # Pass the original DataFrame
-            "pd": pd,  # Pandas
-            "plt": plt,  # Matplotlib
-            "sns": sns   # Seaborn
-        }
-
-        # Execute the code
-        exec(code, exec_globals)
-
-        # Restore standard output
-        sys.stdout = sys.__stdout__
-        output_str = output_buffer.getvalue().strip() or None
-
-        # Retrieve 'final_df' if created
-        final_df = exec_globals.get("final_df", None)
-        if final_df is not None and not isinstance(final_df, pd.DataFrame):
-            return "❌ Error: 'final_df' must be a DataFrame.", None, None
-
-        # Capture figure if any plots were created
-        fig = plt.gcf() if plt.get_fignums() else None
-
-        return output_str, final_df, fig
-
-    except Exception as e:
-        sys.stdout = sys.__stdout__  # Restore stdout in case of an error
-        return f"❌ Error executing code: {str(e)}", None, None
+    return result.output, result.dataframe, result.figure
 
 def make_stop_on_token_callback_exit_code_block():
     in_code_block = False
