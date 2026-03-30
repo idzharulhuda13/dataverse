@@ -257,7 +257,10 @@ with chat_col:
 
             # Show previously generated figure
             if "figure" in msg:
-                st.pyplot(msg["figure"])  # type: ignore
+                try:
+                    st.pyplot(msg["figure"])  # type: ignore
+                except Exception as e:
+                    st.error(f"⚠️ Could not render visual: {e}")
 
             # Show generated insights
             if msg.get("insight"):
@@ -357,13 +360,12 @@ with chat_col:
 
                 with st.spinner("Analyzing chart insights..."):
                     insight_prompt = (
-                        "You are looking at the chart you just generated. Provide a focused data insight using this framework:\n\n"
-                        "**📊 Observation:** What specific patterns, trends, outliers, or distributions do you see? Be precise — cite numbers, percentages, or rankings where possible.\n\n"
-                        "**💡 Interpretation:** Why does this matter? What business or practical implication does this pattern suggest? "
-                        "Consider: Is there a concentration risk? A growth opportunity? An anomaly that needs investigation? A seasonal effect?\n\n"
-                        "Keep it concise (2-4 sentences total). Be specific — avoid generic statements like 'the data shows interesting patterns'. "
-                        "If you spot something surprising or counterintuitive, lead with that. "
-                        "Do NOT suggest follow-up analyses or next steps here — focus purely on what the chart reveals."
+                        "You are looking at the chart you just generated. Provide a focused data insight using this strict two-part framework:\n\n"
+                        "**📊 Observation (What do I see?):** What specific, factual patterns, trends, outliers, or distributions exist in the chart? Be precise — cite numbers, percentages, or rankings where possible.\n\n"
+                        "**💡 Interpretation (Why does it matter?):** What is the core business or practical implication of this pattern? "
+                        "Consider: Is there a concentration risk? A growth opportunity? An anomaly that needs investigation?\n\n"
+                        "Keep it concise (2-4 sentences total). Be highly specific and avoid generic statements.\n\n"
+                        "CRITICAL: Do NOT suggest any recommendations, follow-up analyses, or next steps here. Focus purely on interpreting the visual evidence in front of you."
                     )
                     insight_response = safe_chat_send(st.session_state.chat, [insight_prompt, img])
                     insight_text = extract_non_code_text(
@@ -409,7 +411,10 @@ with dash_col:
             with col:
                 with st.container(border=True):
                     if item["type"] == "figure":
-                        st.pyplot(item["figure"], use_container_width=True)
+                        try:
+                            st.pyplot(item["figure"], use_container_width=True)
+                        except Exception as e:
+                            st.error(f"⚠️ Could not render pinned visual: {e}")
                         if item.get("insight"):
                             st.info(f"💡 {item['insight']}")
 
