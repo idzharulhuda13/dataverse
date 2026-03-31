@@ -33,9 +33,9 @@
 
 ##  Overview
 
-**Dataverse - Data Explorer** (Nano-Dataverse) is an interactive, **AI-powered data analysis and visualization tool** built with **Streamlit** and the **Google Gemini API**.
+**Dataverse - Data Explorer** (Nano-Dataverse) is an interactive, **AI-powered data analysis and visualization tool** built with **Streamlit** and the **Google Gemini API** (via the **Google ADK Framework**).
 
-This application allows users to upload a **CSV file** and then communicate with a **context-aware chat assistant** to perform complex data exploration tasks. The AI (powered by Gemini) intelligently suggests analyses, writes and executes **Python code** (using libraries like **Pandas** and **Seaborn**) on the uploaded DataFrame, and visualizes the results directly within the app. It acts as a powerful, conversational data analyst at your fingertips.
+This application allows users to upload a **CSV file** and then communicate with a **context-aware chat assistant** to perform complex data exploration tasks. The AI intelligently suggests analyses, uses **structured tools** to create charts, writes and executes safe **Python code fallbacks** (using libraries like **Pandas** and **Seaborn**) on the uploaded DataFrame, and visualizes the results directly within the app. It acts as a powerful, conversational data analyst at your fingertips.
 
 ---
 
@@ -55,9 +55,10 @@ This application allows users to upload a **CSV file** and then communicate with
 * **Delete Sessions:** Remove any non-active session with a single click (keeping at least one session always active).
 * **Auto-Save:** Session state is automatically saved after every message exchange.
 
-### Code Execution & Visualization
-* **Intelligent Code Generation:** The AI assistant generates **Python code snippets** (primarily for data manipulation with **Pandas** and visualization with **Seaborn** or **Matplotlib**) in response to user prompts.
-* **4-Layer Sandboxed Execution:** Generated code is executed within a **secure sandbox** that features:
+### Agentic Tool Execution & Visualization
+* **Structured Tool Calling:** Powered by the Google ADK Framework, the agent uses structured tools (`create_visualization`, `get_data_summary`, etc.) to interact with the data efficiently instead of relying solely on raw code generation.
+* **Self-Correcting Error Recovery:** Includes an intelligent retry loop; if code execution or a tool fails, the error is fed back to the LLM allowing the agent to fix its own code autonomously.
+* **4-Layer Sandboxed Execution:** When complex logic requires `execute_python_code_fallback`, code is executed within a **secure sandbox** that features:
     * **AST Static Analysis:** Pre-screens code for malicious patterns before execution.
     * **Gated Imports:** Restricts runtime imports to only safe analytics libraries (pandas, numpy, seaborn, etc.).
     * **Restricted Namespace:** Blocks dangerous built-ins like `eval`, `exec`, and `open`.
@@ -73,9 +74,9 @@ This application allows users to upload a **CSV file** and then communicate with
 
 ### Data Management & Tech Stack
 * **CSV Upload via Chat Input:** Upload your dataset directly within the chat input box for a seamless workflow.
-* **Data Isolation:** Maintains a separate copy of the DataFrame for safe code execution.
+* **Data Isolation:** Maintains a separate copy of the DataFrame for safe code execution, utilizing thread-local storage.
 * **Graceful API Error Handling:** Auto-retries on Gemini 503 demand-spike errors with exponential backoff.
-* **Core Technologies:** Built on **Streamlit**, **Google Gemini API**, and **Pandas**.
+* **Core Technologies:** Built on **Streamlit**, **Google ADK Framework**, **Gemini API**, and **Pandas**.
 
 ---
 
@@ -105,7 +106,8 @@ Any attempt to bypass these restrictions results in a `🛡️ Code blocked` ale
     ├── dataverse_agent/
     │   ├── __init__.py
     │   ├── agent.py
-    │   └── messages.py          ← Centralized chat messages (intro, no-csv, session-resume)
+    │   ├── messages.py          ← Centralized chat messages (intro, no-csv, session-resume)
+    │   └── tools.py             ← ADK FunctionTools for visualization and code execution
     ├── models/
     │   ├── __init__.py
     │   ├── prompt_template.py
