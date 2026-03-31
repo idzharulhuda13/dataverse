@@ -47,7 +47,7 @@ def _format_label(raw: str) -> str:
         "avg_": "Average ", "mean_": "Average ",
         "sum_": "Total ", "total_": "Total ",
         "num_": "Number of ", "cnt_": "Count of ",
-        "pct_": "% of ", "max_": "Max ", "min_": "Min ",
+        "pct_": "% of ", "max_": "Max ", "min_": "Min ",    
     }
     
     label = raw.strip()
@@ -185,9 +185,16 @@ def create_visualization(chart_type: str, x_column: str, y_column: str = None, h
             # Clean up label formatting
             ax.set_xlabel(_format_label(x_column), fontweight="medium", labelpad=10)
             ax.set_ylabel(_format_label(y_column) if y_column else "", fontweight="medium", labelpad=10)
-            # Disable scientific notation on axes
-            ax.xaxis.set_major_formatter(mticker.FuncFormatter(_human_format))
-            ax.yaxis.set_major_formatter(mticker.FuncFormatter(_human_format))
+            # Disable scientific notation on numeric axes ONLY
+            if pd.api.types.is_numeric_dtype(df[x_column]):
+                ax.xaxis.set_major_formatter(mticker.FuncFormatter(_human_format))
+            
+            if y_column:
+                if pd.api.types.is_numeric_dtype(df[y_column]):
+                    ax.yaxis.set_major_formatter(mticker.FuncFormatter(_human_format))
+            else:
+                # E.g. histograms where y-axis is the count/density
+                ax.yaxis.set_major_formatter(mticker.FuncFormatter(_human_format))
             # Auto-rotate x labels if many ticks
             if len(ax.get_xticklabels()) > 6:
                 plt.setp(ax.get_xticklabels(), rotation=40, ha="right", fontsize=9)
