@@ -1,64 +1,27 @@
 import io
+import os
 import random
 import uuid
 import time
+import asyncio
 from datetime import datetime
 
 import streamlit as st
 import pandas as pd
 from google import genai
 from google.genai import types
-from google.genai.errors import ServerError
 
-from models.utils import load_csv, extract_non_code_text, extract_python_code_blocks, execute_python_code
+from models.utils import load_csv, extract_non_code_text
 from dataverse_agent.agent import root_agent
+from dataverse_agent.tools import set_session_context, get_session_figures
 from dataverse_agent.messages import INTRO_MESSAGES, NO_CSV_MESSAGES, SESSION_RESUMED_MESSAGES
+from google.adk.runners import Runner
+from google.adk.sessions.in_memory_session_service import InMemorySessionService
 
 st.set_page_config(page_title="DataVerse - Dashboard Generation", layout="wide")
 
 
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# HELPER FUNCTIONS
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-def safe_chat_send(chat, payload, max_retries=3):
-    """Small wrapper to handle 503 demand spikes gracefully."""
-    for attempt in range(max_retries):
-        try:
-            return chat.send_message(payload)
-        except ServerError as e:
-            if "503" in str(e) and attempt < max_retries - 1:
-                st.warning(f"⚠️ Model is busy (503). Retrying in {2**attempt}s...")
-                time.sleep(2**attempt)
-            else:
-                st.error(f"❌ Gemini API Error: {str(e)}")
-                return None
-        except Exception as e:
-            st.error(f"❌ Unexpected error: {str(e)}")
-            return None
-    return None
-
-
-def _build_instruction(modified_df):
-    """Build the system instruction, optionally appending DataFrame context."""
-    instruction = root_agent.instruction
-    if modified_df is not None:
-        buf = io.StringIO()
-        modified_df.info(buf=buf)
-        df_info = buf.getvalue()
-        df_head = modified_df.head(10).to_string()
-        instruction += f"\n\nHere is the DataFrame Info:\n{df_info}\n\nHere is a sample (head):\n{df_head}"
-    return instruction
-
-
-def _create_chat(modified_df=None):
-    """Create a fresh Gemini chat with the current system instruction."""
-    return st.session_state.client.chats.create(
-        model=st.secrets.get("GEMINI_MODEL"),
-        config=types.GenerateContentConfig(
-            system_instruction=_build_instruction(modified_df)
-        ),
-    )
+# HELPER FUNCTIONS INLINED
 
 
 # ── SESSION MANAGEMENT HELPERS ───────────────────────────────────────────────
@@ -80,7 +43,6 @@ def _create_session(name=None):
         "messages": [{"role": "assistant", "content": random.choice(INTRO_MESSAGES)}],
         "modified_df": None,
         "dashboard_items": [],
-        "chat": _create_chat(),
     }
     return sid
 
@@ -93,7 +55,6 @@ def _save_current_session():
             "messages": st.session_state.messages,
             "modified_df": st.session_state.modified_df,
             "dashboard_items": st.session_state.dashboard_items,
-            "chat": st.session_state.chat,
         })
 
 
@@ -104,7 +65,6 @@ def _load_session(sid):
     st.session_state.messages = session["messages"]
     st.session_state.modified_df = session["modified_df"]
     st.session_state.dashboard_items = session["dashboard_items"]
-    st.session_state.chat = session["chat"]
 
 
 def _switch_session(sid):
@@ -118,14 +78,21 @@ def _switch_session(sid):
 # 1. SESSION STATE INITIALISATION
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-# Gemini client (shared across all sessions)
+# Gemini configuration via os environ for ADK
 api_key = st.secrets.get("GEMINI_API_KEY")
 if not api_key:
     st.error("Missing GEMINI_API_KEY in Streamlit secrets.")
     st.stop()
+os.environ["GEMINI_API_KEY"] = api_key
 
-if "client" not in st.session_state:
-    st.session_state.client = genai.Client(api_key=api_key)
+if "runner" not in st.session_state:
+    st.session_state.session_service = InMemorySessionService()
+    st.session_state.runner = Runner(
+        app_name="dataverse",
+        agent=root_agent,
+        session_service=st.session_state.session_service,
+        auto_create_session=True
+    )
 
 # Sessions registry
 if "sessions" not in st.session_state:
@@ -137,13 +104,9 @@ if "current_session_id" not in st.session_state:
     st.session_state.current_session_id = first_sid
     _load_session(first_sid)
 
-# Defensive: ensure working keys always exist
 for key, default in [("messages", []), ("modified_df", None), ("dashboard_items", [])]:
     if key not in st.session_state:
         st.session_state[key] = default
-
-if "chat" not in st.session_state:
-    st.session_state.chat = _create_chat()
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -326,55 +289,39 @@ with chat_col:
             st.markdown(user_text)
 
         with st.spinner("Agent is thinking..."):
-            max_retries = 3
-            current_prompt = llm_prompt
+            runner = st.session_state.runner
+            current_session = st.session_state.current_session_id
+            
+            # Setup context for tools
+            set_session_context(st.session_state.modified_df)
 
-            for attempt in range(max_retries):
-                response = safe_chat_send(st.session_state.chat, current_prompt)
-                if not response:
-                    if attempt == 0:
-                        st.session_state.messages.pop()
-                    st.stop()
+            async def generate_response():
+                final_text = ""
+                async for event in runner.run_async(
+                    user_id="default",
+                    session_id=current_session,
+                    new_message=types.Content(parts=[types.Part.from_text(text=llm_prompt)])
+                ):
+                    if event.content and event.content.parts:
+                        for p in event.content.parts:
+                            if p.text:
+                                final_text += p.text
+                return final_text
+                
+            response_text = asyncio.run(generate_response())
+            response_without_code = extract_non_code_text(response_text)
+            
+            # Retrieve generated figures from the session context instead of parsing code
+            figures = get_session_figures()
+            figure = figures[-1] if figures else None
 
-                print(f"Usage summary (Attempt {attempt+1}):", getattr(response, "usage_metadata", "N/A"))
-
-                response_without_code = extract_non_code_text(response.text or "")
-                code_blocks = extract_python_code_blocks(response.text or "")
-                code_block = code_blocks[0] if code_blocks else None
-
-                output_str = None
-                figure = None
-                insight_text = None
-
-                if code_block:
-                    if st.session_state.modified_df is not None:
-                        output_str, final_df, figure = execute_python_code(
-                            code_block, st.session_state.modified_df
-                        )
-                    else:
-                        output_str, final_df, figure = "No DataFrame loaded.", None, None
-                        break
-
-                # Check for errors in generated code
-                if output_str and ("❌ Error" in output_str or "🛡️ Code blocked" in output_str):
-                    if attempt < max_retries - 1:
-                        # Feed the error back to the agent for self-correction
-                        current_prompt = f"The code you generated raised this error:\n{output_str}\nPlease fix it and provide the correct code (ensuring imports are correct and module availability)."
-                        continue
-                    else:
-                        break # Max retries reached, exit to show final error
-                else:
-                    break # Success or no code block
-
+            insight_text = None
 
             # SECOND PASS: If figure generated, ask agent to read it and provide insights
             if figure:
-                from PIL import Image
-
-                buf = io.BytesIO()
-                figure.savefig(buf, format="png")
-                buf.seek(0)
-                img = Image.open(buf)
+                img_buf = io.BytesIO()
+                figure.savefig(img_buf, format="png")
+                img_bytes = img_buf.getvalue()
 
                 with st.spinner("Analyzing chart insights..."):
                     insight_prompt = (
@@ -385,10 +332,23 @@ with chat_col:
                         "Keep it concise (2-4 sentences total). Be highly specific and avoid generic statements.\n\n"
                         "CRITICAL: Do NOT suggest any recommendations, follow-up analyses, or next steps here. Focus purely on interpreting the visual evidence in front of you."
                     )
-                    insight_response = safe_chat_send(st.session_state.chat, [insight_prompt, img])
-                    insight_text = extract_non_code_text(
-                        insight_response.text if insight_response else ""
-                    )
+                    async def generate_insight():
+                        text = ""
+                        async for event in runner.run_async(
+                            user_id="default",
+                            session_id=current_session,
+                            new_message=types.Content(parts=[
+                                types.Part.from_text(text=insight_prompt),
+                                types.Part.from_bytes(data=img_bytes, mime_type="image/png")
+                            ])
+                        ):
+                            if event.content and event.content.parts:
+                                for p in event.content.parts:
+                                    if p.text:
+                                        text += p.text
+                        return text
+                        
+                    insight_text = extract_non_code_text(asyncio.run(generate_insight()))
 
             # Save into session state BEFORE rendering so that button reruns don't lose the msg
             assistant_msg = {
@@ -397,11 +357,8 @@ with chat_col:
             }
             if figure is not None:
                 assistant_msg["figure"] = figure
-                assistant_msg["code"] = code_block  # type: ignore
-            if output_str is not None:
-                assistant_msg["output"] = output_str
             if insight_text is not None:
-                assistant_msg["insight"] = insight_text  # type: ignore
+                assistant_msg["insight"] = insight_text
 
             st.session_state.messages.append(assistant_msg)  # type: ignore
             _save_current_session()  # ← auto-save after every message
