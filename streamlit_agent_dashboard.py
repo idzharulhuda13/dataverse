@@ -326,28 +326,46 @@ with chat_col:
             st.markdown(user_text)
 
         with st.spinner("Agent is thinking..."):
-            response = safe_chat_send(st.session_state.chat, llm_prompt)
-            if not response:
-                st.session_state.messages.pop()
-                st.stop()
+            max_retries = 3
+            current_prompt = llm_prompt
 
-            print("Usage summary:", getattr(response, "usage_metadata", "N/A"))
+            for attempt in range(max_retries):
+                response = safe_chat_send(st.session_state.chat, current_prompt)
+                if not response:
+                    if attempt == 0:
+                        st.session_state.messages.pop()
+                    st.stop()
 
-            response_without_code = extract_non_code_text(response.text or "")
-            code_blocks = extract_python_code_blocks(response.text or "")
-            code_block = code_blocks[0] if code_blocks else None
+                print(f"Usage summary (Attempt {attempt+1}):", getattr(response, "usage_metadata", "N/A"))
 
-            output_str = None
-            figure = None
-            insight_text = None
+                response_without_code = extract_non_code_text(response.text or "")
+                code_blocks = extract_python_code_blocks(response.text or "")
+                code_block = code_blocks[0] if code_blocks else None
 
-            if code_block:
-                if st.session_state.modified_df is not None:
-                    output_str, final_df, figure = execute_python_code(
-                        code_block, st.session_state.modified_df
-                    )
+                output_str = None
+                figure = None
+                insight_text = None
+
+                if code_block:
+                    if st.session_state.modified_df is not None:
+                        output_str, final_df, figure = execute_python_code(
+                            code_block, st.session_state.modified_df
+                        )
+                    else:
+                        output_str, final_df, figure = "No DataFrame loaded.", None, None
+                        break
+
+                # Check for errors in generated code
+                if output_str and ("❌ Error" in output_str or "🛡️ Code blocked" in output_str):
+                    if attempt < max_retries - 1:
+                        # Feed the error back to the agent for self-correction
+                        current_prompt = f"The code you generated raised this error:\n{output_str}\nPlease fix it and provide the correct code (ensuring imports are correct and module availability)."
+                        continue
+                    else:
+                        break # Max retries reached, exit to show final error
                 else:
-                    output_str, final_df, figure = "No DataFrame loaded.", None, None
+                    break # Success or no code block
+
 
             # SECOND PASS: If figure generated, ask agent to read it and provide insights
             if figure:
