@@ -11,7 +11,7 @@ import pandas as pd
 from google import genai
 from google.genai import types
 
-from models.utils import load_csv, extract_non_code_text
+from models.utils import load_dataframe, get_excel_sheet_names, extract_non_code_text, SUPPORTED_EXTENSIONS
 from dataverse_agent.agent import root_agent
 from dataverse_agent.tools import set_session_context, get_session_figures, get_cleaned_df
 from dataverse_agent.messages import (
@@ -327,16 +327,34 @@ if st.session_state.modified_df is None:
         )
 
         uploaded_file = st.file_uploader(
-            "Choose a CSV file",
-            type=["csv"],
+            "Choose a data file",
+            type=["csv", "xls", "xlsx", "parquet", "json", "tsv"],
             label_visibility="collapsed",
             key="hero_uploader",
         )
 
         if uploaded_file is not None:
-            df, error = load_csv(uploaded_file)
+            # ── Excel multi-sheet handling ────────────────────────────────
+            selected_sheet = 0  # default: first sheet
+            file_name_lower = uploaded_file.name.lower()
+
+            if file_name_lower.endswith((".xls", ".xlsx")):
+                sheet_names = get_excel_sheet_names(uploaded_file)
+                uploaded_file.seek(0)  # reset after reading sheet names
+
+                if len(sheet_names) > 1:
+                    st.markdown("##### 📑 This file has multiple sheets")
+                    selected_sheet = st.selectbox(
+                        "Select a sheet to load",
+                        options=sheet_names,
+                        key="hero_sheet_picker",
+                    )
+                    if not st.button("✅ Load selected sheet", key="hero_load_sheet", type="primary"):
+                        st.stop()  # wait for user to confirm sheet selection
+
+            df, error = load_dataframe(uploaded_file, sheet_name=selected_sheet)
             if error:
-                st.error(f"Error loading CSV: {error}")
+                st.error(f"⚠️ Error loading file: {error}")
             else:
                 st.session_state.modified_df = df.copy()
 
@@ -418,7 +436,7 @@ else:
                         st.rerun()
 
         # ── Chat Input Box ────────────────────────────────────────────────
-        if prompt := st.chat_input("Ask for a visualization (attach a CSV)...", accept_file="multiple"):
+        if prompt := st.chat_input("Ask for a visualization (attach a data file)...", accept_file="multiple"):
             user_text = (
                 getattr(prompt, "text", "")
                 if hasattr(prompt, "text")
@@ -430,9 +448,9 @@ else:
             append_data_context = ""
             if uploaded_files:
                 uploaded_file = uploaded_files[0]
-                df, error = load_csv(uploaded_file)
+                df, error = load_dataframe(uploaded_file)
                 if error:
-                    st.error(f"Error loading CSV: {error}")
+                    st.error(f"⚠️ Error loading file: {error}")
                 else:
                     st.session_state.modified_df = df.copy()
                     buf = io.StringIO()
