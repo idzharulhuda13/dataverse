@@ -22,6 +22,20 @@ def get_session_figures() -> list:
     _local.figures = []
     return figs
 
+def get_cleaned_df() -> pd.DataFrame | None:
+    """Retrieve the cleaned DataFrame from the cleaning agent, if any.
+    
+    When the cleaning agent executes code that assigns to `final_df`,
+    the sandbox captures it and we store it here. The Streamlit dashboard
+    checks this after each agent run to update the session DataFrame.
+    
+    Returns:
+        The cleaned DataFrame, or None if no cleaning was performed.
+    """
+    cleaned = getattr(_local, "cleaned_df", None)
+    _local.cleaned_df = None  # clear after retrieval
+    return cleaned
+
 def _get_df() -> pd.DataFrame:
     return getattr(_local, "df", None)
 
@@ -89,9 +103,13 @@ def _human_format(val, pos=None):
     elif abs_val == 0:
         return "0"
     elif abs_val < 1:
-        return f"{val:.2f}"
+        return f"{val:.3g}"
     else:
         return f"{sign}{abs_val:.0f}"
+
+def _percent_format(val, pos=None):
+    """Format decimal values (0.0 to 1.0) as percentages (0% to 100%)."""
+    return f"{val * 100:.1f}%".rstrip('0').rstrip('.') + '%'
 
 def create_visualization(chart_type: str, x_column: str, y_column: str = None, hue: str = None, title: str = None, subtitle: str = None) -> str:
     """Create a Seaborn or Matplotlib visualization from the dataset.
@@ -185,13 +203,53 @@ def create_visualization(chart_type: str, x_column: str, y_column: str = None, h
             # Clean up label formatting
             ax.set_xlabel(_format_label(x_column), fontweight="medium", labelpad=10)
             ax.set_ylabel(_format_label(y_column) if y_column else "", fontweight="medium", labelpad=10)
+            
+            # Helper: detect year-like columns (e.g., 2018, 2019...) 
+            def _is_year_column(col_name: str) -> bool:
+                """Check if a numeric column likely contains year values."""
+                if col_name not in df.columns:
+                    return False
+                col = df[col_name].dropna()
+                if len(col) == 0:
+                    return False
+                return (
+                    pd.api.types.is_numeric_dtype(col)
+                    and col.between(1900, 2100).all()
+                    and (col == col.astype(int)).all()
+                )
+
+            # Helper: detect percentage/ratio columns (e.g., share, pct...)
+            def _is_percent_column(col_name: str) -> bool:
+                """Check if a numeric column likely contains percentage/ratio values (0 to 1)."""
+                if col_name not in df.columns:
+                    return False
+                col = df[col_name].dropna()
+                if len(col) == 0:
+                    return False
+                # If name suggests percentage AND values are mostly between 0 and 1
+                name_suggests = any(word in col_name.lower() for word in ["pct", "percent", "share", "ratio", "rate"])
+                if name_suggests and col.between(0, 1.1).mean() > 0.9:
+                    return True
+                return False
+            
             # Disable scientific notation on numeric axes ONLY
+            # But use plain integer formatting for year-like columns
             if pd.api.types.is_numeric_dtype(df[x_column]):
-                ax.xaxis.set_major_formatter(mticker.FuncFormatter(_human_format))
+                if _is_year_column(x_column):
+                    ax.xaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: f"{int(v)}"))
+                elif _is_percent_column(x_column):
+                    ax.xaxis.set_major_formatter(mticker.FuncFormatter(_percent_format))
+                else:
+                    ax.xaxis.set_major_formatter(mticker.FuncFormatter(_human_format))
             
             if y_column:
                 if pd.api.types.is_numeric_dtype(df[y_column]):
-                    ax.yaxis.set_major_formatter(mticker.FuncFormatter(_human_format))
+                    if _is_year_column(y_column):
+                        ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: f"{int(v)}"))
+                    elif _is_percent_column(y_column):
+                        ax.yaxis.set_major_formatter(mticker.FuncFormatter(_percent_format))
+                    else:
+                        ax.yaxis.set_major_formatter(mticker.FuncFormatter(_human_format))
             else:
                 # E.g. histograms where y-axis is the count/density
                 ax.yaxis.set_major_formatter(mticker.FuncFormatter(_human_format))
@@ -272,6 +330,11 @@ def execute_python_code_fallback(code: str) -> str:
         if not hasattr(_local, "figures"):
             _local.figures = []
         _local.figures.append(result.figure)
+    
+    # If the code produced a cleaned DataFrame (final_df), capture it
+    # This is used by the cleaning agent to persist transformations
+    if result.dataframe is not None:
+        _local.cleaned_df = result.dataframe
         
     output = result.output if result.output else "Code executed successfully."
     return output
