@@ -167,7 +167,7 @@ def validate_code(code: str) -> Optional[str]:
 # Modules that LLM-generated code is allowed to import at runtime.
 # These are safe analytics/viz libraries — no filesystem, network, or OS access.
 ALLOWED_MODULES = frozenset({
-    "pandas", "numpy", "matplotlib", "seaborn",
+    "pandas", "numpy", "matplotlib", "seaborn", "prophet",
     "math", "statistics", "collections", "itertools", "functools",
     "datetime", "re", "string", "textwrap", "decimal", "fractions",
     "operator", "copy", "json", "csv",

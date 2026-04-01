@@ -13,7 +13,7 @@ from google.genai import types
 
 from models.utils import load_csv, extract_non_code_text
 from dataverse_agent.agent import root_agent
-from dataverse_agent.tools import set_session_context, get_session_figures
+from dataverse_agent.tools import set_session_context, get_session_figures, get_cleaned_df
 from dataverse_agent.messages import INTRO_MESSAGES, NO_CSV_MESSAGES, SESSION_RESUMED_MESSAGES
 from google.adk.runners import Runner
 from google.adk.sessions.in_memory_session_service import InMemorySessionService
@@ -314,6 +314,13 @@ with chat_col:
             # Retrieve generated figures from the session context instead of parsing code
             figures = get_session_figures()
             figure = figures[-1] if figures else None
+
+            # Check if the cleaning agent produced a transformed DataFrame
+            cleaned_df = get_cleaned_df()
+            if cleaned_df is not None:
+                st.session_state.modified_df = cleaned_df
+                # Update the tool context so subsequent agent calls see the cleaned data
+                set_session_context(cleaned_df)
 
             insight_text = None
 
