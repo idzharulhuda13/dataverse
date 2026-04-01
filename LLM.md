@@ -20,7 +20,7 @@ DataVerse is an **AI-powered, conversational data analysis and visualization too
 | **Frontend / UI** | Streamlit (wide layout, `st.chat_message`, `st.pyplot`) |
 | **Agent Framework** | Google ADK (`google.adk`) — `Runner`, `Agent`, `FunctionTool` |
 | **LLM** | Google Gemini (model from `GEMINI_MODEL` env var, default: `gemini-3.1-flash-lite-preview`) |
-| **Data** | Pandas DataFrames |
+| **Data** | Pandas DataFrames (CSV, Excel, Parquet, JSON, TSV) |
 | **Visualization** | Seaborn + Matplotlib |
 | **Forecasting** | Facebook Prophet |
 | **Package Manager** | `uv` (lockfile: `uv.lock`) |
@@ -29,7 +29,7 @@ DataVerse is an **AI-powered, conversational data analysis and visualization too
 ### Key Dependencies (`pyproject.toml`)
 ```
 google-adk>=1.27.2, google-genai>=1.68.0, gpt4all>=2.8.2,
-matplotlib>=3.10.8, pandas>=2.3.3, prophet>=1.3.0,
+matplotlib>=3.10.8, openpyxl>=3.1.0, pandas>=2.3.3, prophet>=1.3.0,
 python-dotenv>=1.2.2, seaborn>=0.13.2, streamlit>=1.55.0
 ```
 Dev: `pytest>=9.0.2`
@@ -160,7 +160,9 @@ Public API: `safe_execute(code, df, timeout=30) → SandboxResult`
 
 ### `models/utils.py` — Utility Functions
 
-- `load_csv(file)` → `(DataFrame | None, error | None)`
+- `load_dataframe(file, sheet_name=0)` → `(DataFrame | None, error | None)` — multi-format loader (CSV, Excel, Parquet, JSON, TSV) with 200 MB size limit
+- `get_excel_sheet_names(file)` → `list[str]` — returns sheet names for multi-sheet Excel files
+- `load_csv(file)` → deprecated alias for `load_dataframe()`
 - `execute_python_code(code, df)` → `(output, final_df, figure)` — wrapper around `safe_execute`
 - `extract_non_code_text(reply)` — strips code blocks from LLM response
 - `extract_python_code_blocks(reply)` — extracts Python code blocks from LLM response
