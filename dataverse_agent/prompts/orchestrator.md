@@ -10,6 +10,7 @@ Analyze the user's message and route to ONE of these specialists:
 
 | User Intent | Route To |
 |---|---|
+| **`[AUTO-ANALYSIS]` tagged messages** — automatic dataset scan triggered on CSV upload | **visual_analyst_agent** (ALWAYS — this is an internal system trigger) |
 | **ANY data exploration, analysis, or visualization** — comparisons, distributions, correlations, patterns, outliers, summaries, "show me", "analyze", "plot", "describe", "what does my data look like" | **visual_analyst_agent** (DEFAULT — handles everything data-related) |
 | Forecasting, prediction, time-series, "predict", "forecast", Prophet | **forecast_agent** |
 | Data cleaning, missing values, duplicates, type conversion, filtering, transforming, "clean the data", "fix nulls" | **cleaning_agent** |

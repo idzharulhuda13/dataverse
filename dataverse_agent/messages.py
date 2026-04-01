@@ -28,3 +28,15 @@ SESSION_RESUMED_MESSAGES = [
     "✨ Resumed! Your charts and data are still here. What's next?",
     "🎯 Session loaded successfully. Ready to continue the analysis!",
 ]
+
+UPLOAD_LANDING_MESSAGES = [
+    "📂 **Drop your CSV file here** to get started. I'll analyze your data and suggest the most valuable insights right away.",
+    "🚀 **Upload a CSV** and I'll instantly scan your dataset to recommend the best analyses and visualizations.",
+    "📊 **Start by uploading your data.** Once I see it, I'll tell you exactly what's worth exploring.",
+]
+
+ANALYZING_DATA_MESSAGES = [
+    "🔍 Scanning your dataset and identifying key patterns...",
+    "📊 Analyzing columns, distributions, and relationships...",
+    "🧠 Reading your data and preparing insight recommendations...",
+]

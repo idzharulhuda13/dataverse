@@ -14,7 +14,10 @@ from google.genai import types
 from models.utils import load_csv, extract_non_code_text
 from dataverse_agent.agent import root_agent
 from dataverse_agent.tools import set_session_context, get_session_figures, get_cleaned_df
-from dataverse_agent.messages import INTRO_MESSAGES, NO_CSV_MESSAGES, SESSION_RESUMED_MESSAGES
+from dataverse_agent.messages import (
+    INTRO_MESSAGES, NO_CSV_MESSAGES, SESSION_RESUMED_MESSAGES,
+    UPLOAD_LANDING_MESSAGES, ANALYZING_DATA_MESSAGES,
+)
 from google.adk.runners import Runner
 from google.adk.sessions.in_memory_session_service import InMemorySessionService
 
@@ -40,7 +43,7 @@ def _create_session(name=None):
     st.session_state.sessions[sid] = {
         "name": name or _session_display_name(),
         "created_at": datetime.now(),
-        "messages": [{"role": "assistant", "content": random.choice(INTRO_MESSAGES)}],
+        "messages": [],
         "modified_df": None,
         "dashboard_items": [],
     }
@@ -199,208 +202,290 @@ with st.sidebar:
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 3. MAIN LAYOUT – CHAT + DASHBOARD
+# 3. HELPER — Run agent and handle response (reused by upload + chat)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def _run_agent_and_save(llm_prompt: str, user_display_text: str | None = None):
+    """Send a prompt to the agent, capture response + figures, and save to session.
+
+    Args:
+        llm_prompt: The full prompt to send to the LLM (may include system context).
+        user_display_text: If provided, added as a visible 'user' message in chat history.
+    """
+    if user_display_text is not None:
+        st.session_state.messages.append({"role": "user", "content": user_display_text})
+
+    runner = st.session_state.runner
+    current_session = st.session_state.current_session_id
+
+    # Setup context for tools
+    set_session_context(st.session_state.modified_df)
+
+    async def generate_response():
+        final_text = ""
+        async for event in runner.run_async(
+            user_id="default",
+            session_id=current_session,
+            new_message=types.Content(parts=[types.Part.from_text(text=llm_prompt)])
+        ):
+            if event.content and event.content.parts:
+                for p in event.content.parts:
+                    if p.text:
+                        final_text += p.text
+        return final_text
+
+    response_text = asyncio.run(generate_response())
+    response_without_code = extract_non_code_text(response_text)
+
+    # Retrieve generated figures from the session context
+    figures = get_session_figures()
+    figure = figures[-1] if figures else None
+
+    # Check if the cleaning agent produced a transformed DataFrame
+    cleaned_df = get_cleaned_df()
+    if cleaned_df is not None:
+        st.session_state.modified_df = cleaned_df
+        set_session_context(cleaned_df)
+
+    insight_text = None
+
+    # SECOND PASS: If figure generated, ask agent to read it and provide insights
+    if figure:
+        img_buf = io.BytesIO()
+        figure.savefig(img_buf, format="png")
+        img_bytes = img_buf.getvalue()
+
+        with st.spinner("Analyzing chart insights..."):
+            insight_prompt = (
+                "You are looking at the chart you just generated. Provide a focused data insight using this strict two-part framework:\n\n"
+                "**📊 Observation (What do I see?):** What specific, factual patterns, trends, outliers, or distributions exist in the chart? Be precise — cite numbers, percentages, or rankings where possible.\n\n"
+                "**💡 Interpretation (Why does it matter?):** What is the core business or practical implication of this pattern? "
+                "Consider: Is there a concentration risk? A growth opportunity? An anomaly that needs investigation?\n\n"
+                "Keep it concise (2-4 sentences total). Be highly specific and avoid generic statements.\n\n"
+                "CRITICAL: Do NOT suggest any recommendations, follow-up analyses, or next steps here. Focus purely on interpreting the visual evidence in front of you."
+            )
+            async def generate_insight():
+                text = ""
+                async for event in runner.run_async(
+                    user_id="default",
+                    session_id=current_session,
+                    new_message=types.Content(parts=[
+                        types.Part.from_text(text=insight_prompt),
+                        types.Part.from_bytes(data=img_bytes, mime_type="image/png")
+                    ])
+                ):
+                    if event.content and event.content.parts:
+                        for p in event.content.parts:
+                            if p.text:
+                                text += p.text
+                return text
+
+            insight_text = extract_non_code_text(asyncio.run(generate_insight()))
+
+    # Build assistant message
+    assistant_msg = {
+        "role": "assistant",
+        "content": response_without_code,
+    }
+    if figure is not None:
+        assistant_msg["figure"] = figure
+    if insight_text is not None:
+        assistant_msg["insight"] = insight_text
+
+    st.session_state.messages.append(assistant_msg)  # type: ignore
+    _save_current_session()
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 4. MAIN LAYOUT — UPLOAD-FIRST or CHAT + DASHBOARD
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 st.title("DataVerse - Agent Dashboard Generation")
 
-chat_col, dash_col = st.columns([4, 6], gap="large")
+# ── BRANCH: No data loaded yet → Upload-First Landing ─────────────────────
+if st.session_state.modified_df is None:
 
-with chat_col:
-    st.subheader("💬 Chat & Explore")
+    st.markdown("")
+    # Centered hero layout
+    _left_spacer, center_col, _right_spacer = st.columns([1, 2, 1])
 
-    # Render previous chat history
-    for idx, msg in enumerate(st.session_state.messages):  # type: ignore
-        with st.chat_message(msg["role"]):  # type: ignore
-            st.markdown(msg["content"])  # type: ignore
+    with center_col:
+        st.markdown(
+            "<div style='text-align:center; padding: 1.5rem 0 0.5rem;'>"
+            "<span style='font-size:3.5rem;'>📂</span>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            "<h2 style='text-align:center; margin-bottom:0.25rem;'>Upload Your Dataset</h2>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            f"<p style='text-align:center; color:#64748B; font-size:1.05rem; margin-bottom:1.5rem;'>"
+            f"{random.choice(UPLOAD_LANDING_MESSAGES)}</p>",
+            unsafe_allow_html=True,
+        )
 
-            # Show output string from code execution
-            if "output" in msg:
-                st.markdown(f"```python\n{msg['output']}\n```")  # type: ignore
+        uploaded_file = st.file_uploader(
+            "Choose a CSV file",
+            type=["csv"],
+            label_visibility="collapsed",
+            key="hero_uploader",
+        )
 
-            # Show previously generated figure
-            if "figure" in msg:
-                try:
-                    st.pyplot(msg["figure"])  # type: ignore
-                except Exception as e:
-                    st.error(f"⚠️ Could not render visual: {e}")
-
-            # Show generated insights
-            if msg.get("insight"):
-                st.info(f"💡 **Data Insight**: {msg['insight']}")
-
-            if "figure" in msg:
-                # Add Pin button for this figure if it hasn't been pinned yet
-                pin_key = f"pin_btn_{idx}"
-                if st.button("📌 Pin to Dashboard", key=pin_key):
-                    item = {
-                        "type": "figure",
-                        "figure": msg["figure"],
-                        "code": msg.get("code", ""),
-                        "insight": msg.get("insight", ""),
-                    }
-                    st.session_state.dashboard_items.append(item)
-                    _save_current_session()
-                    st.rerun()
-
-    # ── Chat Input Box ────────────────────────────────────────────────────
-    if prompt := st.chat_input("Ask for a visualization (attach a CSV)...", accept_file="multiple"):
-        user_text = (
-            getattr(prompt, "text", "")
-            if hasattr(prompt, "text")
-            else (prompt if isinstance(prompt, str) else "")
-        )  # type: ignore
-        uploaded_files = getattr(prompt, "files", []) if hasattr(prompt, "files") else []
-
-        # Handle new file uploads
-        append_data_context = ""
-        if uploaded_files:
-            uploaded_file = uploaded_files[0]
+        if uploaded_file is not None:
             df, error = load_csv(uploaded_file)
             if error:
                 st.error(f"Error loading CSV: {error}")
             else:
                 st.session_state.modified_df = df.copy()
+
+                # Build the system context string
                 buf = io.StringIO()
                 st.session_state.modified_df.info(buf=buf)
                 df_info = buf.getvalue()
                 df_head = st.session_state.modified_df.head(10).to_string()  # type: ignore
-                append_data_context = (
-                    f"\n\n[System Context]: The user just uploaded a new dataset. "
+
+                auto_prompt = (
+                    "[AUTO-ANALYSIS]\n\n"
+                    "[System Context]: The user just uploaded a new dataset. "
                     f"Here is the DataFrame Info:\n{df_info}\n\n"
-                    f"And a sample (head):\n{df_head}\nAssume it is loaded as `df`."
+                    f"And a sample (head):\n{df_head}\n"
+                    "Assume it is loaded as `df`.\n\n"
+                    "Analyze this dataset and recommend 5 specific insights or analyses "
+                    "the user could explore. Do NOT create any charts yet."
                 )
 
-        # The actual prompt we send to the LLM
-        llm_prompt = user_text + append_data_context
+                with st.spinner(random.choice(ANALYZING_DATA_MESSAGES)):
+                    _run_agent_and_save(auto_prompt)
 
-        # Guard: if no dataset is loaded yet, ask the user to upload a CSV first
-        if st.session_state.modified_df is None and not uploaded_files:
-            st.session_state.messages.append({"role": "user", "content": user_text})  # type: ignore
-            st.session_state.messages.append(
-                {"role": "assistant", "content": random.choice(NO_CSV_MESSAGES)}
+                st.rerun()
+
+        # Helpful tips below the uploader
+        st.markdown("")
+        st.markdown("---")
+        tips_col1, tips_col2, tips_col3 = st.columns(3)
+        with tips_col1:
+            st.markdown("##### 📊 Visualize")
+            st.caption("Generate bar, line, scatter, and more charts from your data.")
+        with tips_col2:
+            st.markdown("##### 🔮 Forecast")
+            st.caption("Predict future trends with time-series analysis.")
+        with tips_col3:
+            st.markdown("##### 🧹 Clean")
+            st.caption("Fix missing values, duplicates, and data quality issues.")
+
+
+# ── BRANCH: Data loaded → Normal Chat + Dashboard ─────────────────────────
+else:
+    chat_col, dash_col = st.columns([4, 6], gap="large")
+
+    with chat_col:
+        st.subheader("💬 Chat & Explore")
+
+        # Render previous chat history
+        for idx, msg in enumerate(st.session_state.messages):  # type: ignore
+            with st.chat_message(msg["role"]):  # type: ignore
+                st.markdown(msg["content"])  # type: ignore
+
+                # Show output string from code execution
+                if "output" in msg:
+                    st.markdown(f"```python\n{msg['output']}\n```")  # type: ignore
+
+                # Show previously generated figure
+                if "figure" in msg:
+                    try:
+                        st.pyplot(msg["figure"])  # type: ignore
+                    except Exception as e:
+                        st.error(f"⚠️ Could not render visual: {e}")
+
+                # Show generated insights
+                if msg.get("insight"):
+                    st.info(f"💡 **Data Insight**: {msg['insight']}")
+
+                if "figure" in msg:
+                    # Add Pin button for this figure if it hasn't been pinned yet
+                    pin_key = f"pin_btn_{idx}"
+                    if st.button("📌 Pin to Dashboard", key=pin_key):
+                        item = {
+                            "type": "figure",
+                            "figure": msg["figure"],
+                            "code": msg.get("code", ""),
+                            "insight": msg.get("insight", ""),
+                        }
+                        st.session_state.dashboard_items.append(item)
+                        _save_current_session()
+                        st.rerun()
+
+        # ── Chat Input Box ────────────────────────────────────────────────
+        if prompt := st.chat_input("Ask for a visualization (attach a CSV)...", accept_file="multiple"):
+            user_text = (
+                getattr(prompt, "text", "")
+                if hasattr(prompt, "text")
+                else (prompt if isinstance(prompt, str) else "")
             )  # type: ignore
-            _save_current_session()
-            st.rerun()
+            uploaded_files = getattr(prompt, "files", []) if hasattr(prompt, "files") else []
 
-        # Add only the user's text to the visible UI history
-        st.session_state.messages.append({"role": "user", "content": user_text})  # type: ignore
-        with st.chat_message("user"):
-            st.markdown(user_text)
-
-        with st.spinner("Agent is thinking..."):
-            runner = st.session_state.runner
-            current_session = st.session_state.current_session_id
-            
-            # Setup context for tools
-            set_session_context(st.session_state.modified_df)
-
-            async def generate_response():
-                final_text = ""
-                async for event in runner.run_async(
-                    user_id="default",
-                    session_id=current_session,
-                    new_message=types.Content(parts=[types.Part.from_text(text=llm_prompt)])
-                ):
-                    if event.content and event.content.parts:
-                        for p in event.content.parts:
-                            if p.text:
-                                final_text += p.text
-                return final_text
-                
-            response_text = asyncio.run(generate_response())
-            response_without_code = extract_non_code_text(response_text)
-            
-            # Retrieve generated figures from the session context instead of parsing code
-            figures = get_session_figures()
-            figure = figures[-1] if figures else None
-
-            # Check if the cleaning agent produced a transformed DataFrame
-            cleaned_df = get_cleaned_df()
-            if cleaned_df is not None:
-                st.session_state.modified_df = cleaned_df
-                # Update the tool context so subsequent agent calls see the cleaned data
-                set_session_context(cleaned_df)
-
-            insight_text = None
-
-            # SECOND PASS: If figure generated, ask agent to read it and provide insights
-            if figure:
-                img_buf = io.BytesIO()
-                figure.savefig(img_buf, format="png")
-                img_bytes = img_buf.getvalue()
-
-                with st.spinner("Analyzing chart insights..."):
-                    insight_prompt = (
-                        "You are looking at the chart you just generated. Provide a focused data insight using this strict two-part framework:\n\n"
-                        "**📊 Observation (What do I see?):** What specific, factual patterns, trends, outliers, or distributions exist in the chart? Be precise — cite numbers, percentages, or rankings where possible.\n\n"
-                        "**💡 Interpretation (Why does it matter?):** What is the core business or practical implication of this pattern? "
-                        "Consider: Is there a concentration risk? A growth opportunity? An anomaly that needs investigation?\n\n"
-                        "Keep it concise (2-4 sentences total). Be highly specific and avoid generic statements.\n\n"
-                        "CRITICAL: Do NOT suggest any recommendations, follow-up analyses, or next steps here. Focus purely on interpreting the visual evidence in front of you."
+            # Handle new file uploads (re-upload mid-session)
+            append_data_context = ""
+            if uploaded_files:
+                uploaded_file = uploaded_files[0]
+                df, error = load_csv(uploaded_file)
+                if error:
+                    st.error(f"Error loading CSV: {error}")
+                else:
+                    st.session_state.modified_df = df.copy()
+                    buf = io.StringIO()
+                    st.session_state.modified_df.info(buf=buf)
+                    df_info = buf.getvalue()
+                    df_head = st.session_state.modified_df.head(10).to_string()  # type: ignore
+                    append_data_context = (
+                        f"\n\n[System Context]: The user just uploaded a new dataset. "
+                        f"Here is the DataFrame Info:\n{df_info}\n\n"
+                        f"And a sample (head):\n{df_head}\nAssume it is loaded as `df`."
                     )
-                    async def generate_insight():
-                        text = ""
-                        async for event in runner.run_async(
-                            user_id="default",
-                            session_id=current_session,
-                            new_message=types.Content(parts=[
-                                types.Part.from_text(text=insight_prompt),
-                                types.Part.from_bytes(data=img_bytes, mime_type="image/png")
-                            ])
-                        ):
-                            if event.content and event.content.parts:
-                                for p in event.content.parts:
-                                    if p.text:
-                                        text += p.text
-                        return text
-                        
-                    insight_text = extract_non_code_text(asyncio.run(generate_insight()))
 
-            # Save into session state BEFORE rendering so that button reruns don't lose the msg
-            assistant_msg = {
-                "role": "assistant",
-                "content": response_without_code,
-            }
-            if figure is not None:
-                assistant_msg["figure"] = figure
-            if insight_text is not None:
-                assistant_msg["insight"] = insight_text
+            # The actual prompt we send to the LLM
+            llm_prompt = user_text + append_data_context
 
-            st.session_state.messages.append(assistant_msg)  # type: ignore
-            _save_current_session()  # ← auto-save after every message
+            with st.chat_message("user"):
+                st.markdown(user_text)
+
+            with st.spinner("Agent is thinking..."):
+                _run_agent_and_save(llm_prompt, user_display_text=user_text)
+
             st.rerun()
 
 
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 4. DASHBOARD RENDER
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # 5. DASHBOARD RENDER
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-with dash_col:
-    st.subheader("📊 Generated Dashboard")
-    st.markdown("Your pinned visualizations will appear here in real-time.")
-    st.divider()
+    with dash_col:
+        st.subheader("📊 Generated Dashboard")
+        st.markdown("Your pinned visualizations will appear here in real-time.")
+        st.divider()
 
-    if not st.session_state.dashboard_items:
-        st.info(
-            "No items pinned yet. Ask the agent to generate some visualizations "
-            "and click '📌 Pin to Dashboard'."
-        )
-    else:
-        db_cols = st.columns(2)
-        for i, item in enumerate(st.session_state.dashboard_items):
-            col = db_cols[i % 2]
-            with col:
-                with st.container(border=True):
-                    if item["type"] == "figure":
-                        try:
-                            st.pyplot(item["figure"], use_container_width=True)
-                        except Exception as e:
-                            st.error(f"⚠️ Could not render pinned visual: {e}")
-                        if item.get("insight"):
-                            st.info(f"💡 {item['insight']}")
+        if not st.session_state.dashboard_items:
+            st.info(
+                "No items pinned yet. Ask the agent to generate some visualizations "
+                "and click '📌 Pin to Dashboard'."
+            )
+        else:
+            db_cols = st.columns(2)
+            for i, item in enumerate(st.session_state.dashboard_items):
+                col = db_cols[i % 2]
+                with col:
+                    with st.container(border=True):
+                        if item["type"] == "figure":
+                            try:
+                                st.pyplot(item["figure"], use_container_width=True)
+                            except Exception as e:
+                                st.error(f"⚠️ Could not render pinned visual: {e}")
+                            if item.get("insight"):
+                                st.info(f"💡 {item['insight']}")
 
-                        if st.button("❌ Remove", key=f"remove_btn_{i}"):
-                            st.session_state.dashboard_items.pop(i)
-                            _save_current_session()
-                            st.rerun()
+                            if st.button("❌ Remove", key=f"remove_btn_{i}"):
+                                st.session_state.dashboard_items.pop(i)
+                                _save_current_session()
+                                st.rerun()
