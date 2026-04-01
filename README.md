@@ -47,6 +47,15 @@ This application allows users to upload a **CSV file** and then communicate with
 * **Randomized Welcome Messages:** Every new session greets you with a unique, randomized welcome message for a fresh experience.
 * **CSV Upload Guard:** The agent enforces uploading a CSV file before any analysis can begin, ensuring data is always present before queries.
 
+### Multi-Agent Architecture
+* **Orchestrator Agent:** The central router that analyzes complex user requests and seamlessly delegates tasks to specialized sub-agents.
+* **Specialized Sub-Agents:**
+    * **Visual Analyst Agent:** Focuses strictly on statistical analysis and generating premium, highly-accurate visualizations.
+    * **Forecasting Agent:** Specializes in time-series predictions, authorized to utilize the `prophet` library inside the execution sandbox.
+    * **Cleaning Agent:** Handles data transformations, imputation, filtering, and persisting the cleaned state back to the dashboard session.
+* **Improved Predictability:** By giving each agent a narrow scope, a specific set of tools, and a highly tuned system prompt, the AI's behavior becomes much more predictable, safe, and accurate.
+
+
 ### Session Management
 * **Persistent Chat Sessions:** Create and switch between multiple independent chat sessions — each with its own conversation history, uploaded dataset, and pinned dashboard items.
 * **Session Sidebar:** The sidebar lists all sessions, showing creation time, message count, and data status at a glance.
@@ -86,7 +95,7 @@ The DataVerse agent prioritizes security by running all LLM-generated Python cod
 
 *   **Layer 1 (Blocklists):** Hard-coded rejection of 20+ dangerous modules (os, subprocess, socket) and built-ins (exec, eval, open).
 *   **Layer 2 (AST Analysis):** Uses Python's Abstract Syntax Tree (AST) to statically analyze code before it ever runs, catching dunder attribute escapes and hidden `__import__` calls.
-*   **Layer 3 (Gated Namespace):** Provides a restricted execution environment where only whitelisted analytics libraries are accessible.
+*   **Layer 3 (Gated Namespace):** Provides a restricted execution environment where only whitelisted analytics libraries (including `pandas`, `seaborn`, and `prophet`) are accessible.
 *   **Layer 4 (Resource Limits):** A dedicated thread-based timeout (30s) prevents infinite loops or resource exhaustion from crashing the app.
 
 Any attempt to bypass these restrictions results in a `🛡️ Code blocked` alert in the chat.
@@ -105,7 +114,9 @@ Any attempt to bypass these restrictions results in a `🛡️ Code blocked` ale
     │   └── check csv dataviz - Sheet1.csv
     ├── dataverse_agent/
     │   ├── __init__.py
-    │   ├── agent.py
+    │   ├── agent.py             ← Main entry point for the Multi-Agent Orchestrator
+    │   ├── agents/              ← Specialized sub-agents (Cleaning, Forecast, Visual Analyst)
+    │   ├── prompts/             ← Specific instruction prompts for each sub-agent
     │   ├── messages.py          ← Centralized chat messages (intro, no-csv, session-resume)
     │   └── tools.py             ← ADK FunctionTools for visualization and code execution
     ├── models/
