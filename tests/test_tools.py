@@ -172,3 +172,86 @@ def test_hue_legend_formatting():
     legend = ax.get_legend()
     assert legend is not None
     assert legend.get_title().get_text() == "Average Price EUR"
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# ADDITIONAL TOOL TESTS
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def test_session_context_management(bmw_df):
+    """Verify set_session_context and _get_df work as expected."""
+    set_session_context(bmw_df)
+    assert _local.df is bmw_df
+    from dataverse_agent.tools import _get_df
+    assert _get_df() is bmw_df
+
+def test_get_session_figures_handling():
+    """Verify figures are correctly collected and cleared."""
+    fig1, ax1 = plt.subplots()
+    fig2, ax2 = plt.subplots()
+    _local.figures = [fig1, fig2]
+    
+    figs = get_session_figures()
+    assert len(figs) == 2
+    assert fig1 in figs
+    assert fig2 in figs
+    
+    # Verify it cleared the store
+    assert len(get_session_figures()) == 0
+    plt.close(fig1)
+    plt.close(fig2)
+
+def test_get_cleaned_df_handling(bmw_df):
+    """Verify cleaned_df is retrieved and cleared."""
+    _local.cleaned_df = bmw_df
+    from dataverse_agent.tools import get_cleaned_df
+    assert get_cleaned_df() is bmw_df
+    assert get_cleaned_df() is None
+
+def test_get_data_summary(bmw_df):
+    """Verify the summary string describes the current dataframe."""
+    set_session_context(bmw_df)
+    from dataverse_agent.tools import get_data_summary
+    summary = get_data_summary()
+    assert "Data Summary:" in summary
+    assert "First 5 rows:" in summary
+    assert "Model" in summary # Column name from bmw dataset
+
+def test_get_data_summary_no_df():
+    """Verify error message when no dataframe is loaded."""
+    if hasattr(_local, "df"):
+        del _local.df
+    from dataverse_agent.tools import get_data_summary
+    assert "Error: No dataset loaded" in get_data_summary()
+
+def test_execute_python_code_fallback_success(bmw_df):
+    """Verify arbitrary code execution and result capture."""
+    set_session_context(bmw_df)
+    from dataverse_agent.tools import execute_python_code_fallback
+    code = "final_df = df.copy()\nfinal_df['new_col'] = 123\nprint('Hello Fallback')"
+    output = execute_python_code_fallback(code)
+    
+    assert "Hello Fallback" in output
+    # Verify cleaned_df was updated in _local
+    from dataverse_agent.tools import get_cleaned_df
+    cleaned = get_cleaned_df()
+    assert cleaned is not None
+    assert 'new_col' in cleaned.columns
+
+def test_execute_python_code_fallback_figure(bmw_df):
+    """Verify figures from fallback execution are captured."""
+    set_session_context(bmw_df)
+    from dataverse_agent.tools import execute_python_code_fallback
+    code = "import matplotlib.pyplot as plt\nplt.figure()\nplt.plot([1, 2], [1, 2])"
+    execute_python_code_fallback(code)
+    
+    figs = get_session_figures()
+    assert len(figs) == 1
+    plt.close('all')
+
+def test_execute_python_code_fallback_blocked(bmw_df):
+    """Verify blocked code returns error message."""
+    set_session_context(bmw_df)
+    from dataverse_agent.tools import execute_python_code_fallback
+    code = "import os\nos.getcwd()"
+    output = execute_python_code_fallback(code)
+    assert "Code blocked" in output
