@@ -364,14 +364,29 @@ if st.session_state.modified_df is None:
                 df_info = buf.getvalue()
                 df_head = st.session_state.modified_df.head(10).to_string()  # type: ignore
 
+                # PHASE 1: Data Quality Check (Cleaning Agent)
+                # We fire a silent prompt directly to the Orchestrator/Cleaning Agent
+                # to perform automated data quality repairs before analysis starts.
+                cleaning_prompt = (
+                    "[INITIAL-CLEANING]\n\n"
+                    "[System Context]: The user just uploaded a new dataset. "
+                    "Analyze the dataset for missing values, duplicate rows, and incorrect data types. "
+                    "Apply necessary corrections (e.g., filling nulls with median, dropping duplicates) "
+                    "and SAVE the cleaned result to `final_df` so it persists for the user. "
+                    "Report a concise summary of what was cleaned."
+                )
+
+                with st.spinner("Ensuring data quality... (Cleaning Phase)"):
+                    _run_agent_and_save(cleaning_prompt)
+
+                # PHASE 2: Exploratory Insights (Visual Analyst)
+                # Now that the data is clean (st.session_state.modified_df is updated via _run_agent_and_save),
+                # we fire the original [AUTO-ANALYSIS] prompt for recommendations.
                 auto_prompt = (
                     "[AUTO-ANALYSIS]\n\n"
-                    "[System Context]: The user just uploaded a new dataset. "
-                    f"Here is the DataFrame Info:\n{df_info}\n\n"
-                    f"And a sample (head):\n{df_head}\n"
-                    "Assume it is loaded as `df`.\n\n"
-                    "Analyze this dataset and recommend 5 specific insights or analyses "
-                    "the user could explore. Do NOT create any charts yet."
+                    "[System Context]: The dataset has been cleaned. "
+                    "Recommend 5 specific insights or analyses the user could explore. "
+                    "Do NOT create any charts yet."
                 )
 
                 with st.spinner(random.choice(ANALYZING_DATA_MESSAGES)):
