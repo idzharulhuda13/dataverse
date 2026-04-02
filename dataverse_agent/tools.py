@@ -80,8 +80,9 @@ def _format_label(raw: str) -> str:
             label = replacement + label[len(prefix):]
             break
     
-    # Replace underscores/hyphens with spaces, then title-case
-    label = label.replace("_", " ").replace("-", " ").strip().title()
+    # Replace underscores/hyphens with spaces, then title-case each word, preserving uppercase acronyms
+    words = label.replace("_", " ").replace("-", " ").strip().split()
+    label = " ".join(w if w.isupper() else w.title() for w in words)
     
     # Append the parenthetical suffix
     label += suffix_added
