@@ -37,6 +37,11 @@ def get_cleaned_df() -> pd.DataFrame | None:
     return cleaned
 
 def _get_df() -> pd.DataFrame:
+    # Prioritize the cleaned DataFrame from a previous execution step (e.g. filtering/sorting)
+    # This enables multi-step execution: Step 1 (fallback_tool) filters -> Step 2 (viz_tool) plots the result.
+    cleaned = getattr(_local, "cleaned_df", None)
+    if cleaned is not None:
+        return cleaned
     return getattr(_local, "df", None)
 
 def _format_label(raw: str) -> str:
@@ -112,7 +117,7 @@ def _percent_format(val, pos=None):
     """Format decimal values (0.0 to 1.0) as percentages (0% to 100%)."""
     return f"{val * 100:.1f}%".rstrip('0').rstrip('.') + '%'
 
-def create_visualization(chart_type: str, x_column: str, y_column: str = None, hue: str = None, title: str = None, subtitle: str = None) -> str:
+def create_visualization(chart_type: str, x_column: str, y_column: str = None, hue: str = None, estimator: str = "mean", title: str = None, subtitle: str = None) -> str:
     """Create a Seaborn or Matplotlib visualization from the dataset.
     
     Args:
@@ -120,6 +125,7 @@ def create_visualization(chart_type: str, x_column: str, y_column: str = None, h
         x_column: The name of the column for the X-axis.
         y_column: The name of the column for the Y-axis (optional for some charts).
         hue: The name of the column to group by color (optional).
+        estimator: Statistical function to use for aggregation ('mean', 'sum', 'count', 'min', 'max'). Defaults to 'mean'.
         title: The title of the chart (e.g. "Revenue by Region").
         subtitle: A short, insight-driven description shown below the title (e.g. "North America leads with 42% of total revenue, followed by EMEA at 28%").
         
@@ -163,13 +169,18 @@ def create_visualization(chart_type: str, x_column: str, y_column: str = None, h
         palette = PALETTE if hue else [HIGHLIGHT]
         
         if chart_type == 'bar':
-            sns.barplot(data=df, x=x_column, y=y_column, hue=hue, palette=palette, ax=ax, edgecolor="none", saturation=0.95)
+            sns.barplot(data=df, x=x_column, y=y_column, hue=hue, palette=palette, ax=ax, edgecolor="none", saturation=0.95, estimator=estimator)
             # Add human-readable value labels on bars
             for container in ax.containers:
                 labels = [_human_format(v.get_height()) for v in container]
                 ax.bar_label(container, labels=labels, fontsize=9, color=CAPTION_COLOR, padding=3)
         elif chart_type == 'line':
-            sns.lineplot(data=df, x=x_column, y=y_column, hue=hue, palette=palette, ax=ax, linewidth=2.5, marker="o", markersize=6)
+            # Dynamic Error Bars: if there are many categories in hue, disable shaded error bars for clarity
+            error_config = "sd"
+            if hue and df[hue].nunique() > 3:
+                error_config = None
+            
+            sns.lineplot(data=df, x=x_column, y=y_column, hue=hue, palette=palette, ax=ax, linewidth=2.5, marker="o", markersize=6, estimator=estimator, errorbar=error_config)
         elif chart_type == 'scatter':
             sns.scatterplot(data=df, x=x_column, y=y_column, hue=hue, palette=palette, ax=ax, s=70, alpha=0.8, edgecolor="white", linewidth=0.5)
         elif chart_type == 'hist':
@@ -213,11 +224,38 @@ def create_visualization(chart_type: str, x_column: str, y_column: str = None, h
                 col = df[col_name].dropna()
                 if len(col) == 0:
                     return False
+                
+                # Check for 4-digit integers in year range
+                is_numeric = pd.api.types.is_numeric_dtype(col)
+                if not is_numeric:
+                    return False
+                
+                # Use a tighter check for "year-like" behavior
+                # Years usually have low variance relative to their scale and are integers
                 return (
-                    pd.api.types.is_numeric_dtype(col)
-                    and col.between(1900, 2100).all()
+                    col.between(1900, 2100).all()
                     and (col == col.astype(int)).all()
                 )
+
+            # Helper: detect month-like columns (e.g., 1-12)
+            def _is_month_column(col_name: str) -> bool:
+                """Check if a column likely contains month values (1-12)."""
+                if col_name not in df.columns:
+                    return False
+                col = df[col_name].dropna()
+                if len(col) == 0:
+                    return False
+                
+                # Name contains "month" and values are integers 1-12
+                name_suggests = "month" in col_name.lower()
+                is_int_1_12 = pd.api.types.is_numeric_dtype(col) and col.between(1, 12).all() and (col == col.astype(int)).all()
+                
+                return name_suggests and is_int_1_12
+
+            def _month_name(val, pos=None):
+                months = {1: 'Jan', 2: 'Feb', 3: 'Mar', 4: 'Apr', 5: 'May', 6: 'Jun', 
+                          7: 'Jul', 8: 'Aug', 9: 'Sep', 10: 'Oct', 11: 'Nov', 12: 'Dec'}
+                return months.get(int(val), str(int(val)))
 
             # Helper: detect percentage/ratio columns (e.g., share, pct...)
             def _is_percent_column(col_name: str) -> bool:
@@ -238,6 +276,8 @@ def create_visualization(chart_type: str, x_column: str, y_column: str = None, h
             if pd.api.types.is_numeric_dtype(df[x_column]):
                 if _is_year_column(x_column):
                     ax.xaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: f"{int(v)}"))
+                elif _is_month_column(x_column):
+                    ax.xaxis.set_major_formatter(mticker.FuncFormatter(_month_name))
                 elif _is_percent_column(x_column):
                     ax.xaxis.set_major_formatter(mticker.FuncFormatter(_percent_format))
                 else:
@@ -247,6 +287,8 @@ def create_visualization(chart_type: str, x_column: str, y_column: str = None, h
                 if pd.api.types.is_numeric_dtype(df[y_column]):
                     if _is_year_column(y_column):
                         ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: f"{int(v)}"))
+                    elif _is_month_column(y_column):
+                        ax.yaxis.set_major_formatter(mticker.FuncFormatter(_month_name))
                     elif _is_percent_column(y_column):
                         ax.yaxis.set_major_formatter(mticker.FuncFormatter(_percent_format))
                     else:
