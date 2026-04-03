@@ -88,6 +88,12 @@ DataVerse/
 User Chat Input
       │
       ▼
+┌──────────────────┐
+│ Query Enricher   │  ← Direct Gemini API call (not an ADK agent)
+│ (stateless)      │  ← Rewrites & aligns query to dataset schema
+└──────┬───────────┘
+       │ (Enriched Query)
+       ▼
 ┌──────────────────────────────────────┐
 │  Orchestrator (root_agent)           │  ← Routes requests to specialists
 │  Model: Gemini                       │
@@ -107,6 +113,7 @@ User Chat Input
  └───────────┘ └──────────┘ └──────────┘
 ```
 
+- **Query Enricher:** Stateless, single-shot Gemini API call (`enrich_query()` in `dataverse_agent/agents/enricher.py`). Rewrites vague user queries into specific analytical prompts aligned with the dataset schema. Not an ADK agent — uses `google.genai.Client` directly for speed.
 - **Orchestrator:** Analyzes intent, delegates to the correct sub-agent. Has no tools itself.
 - **Visual Analyst:** Stats analysis + chart creation. Has `create_visualization`, `get_data_summary`, `execute_python_code_fallback`.
 - **Forecast Agent:** Time-series predictions via Prophet. Has `execute_python_code_fallback` only.
