@@ -64,3 +64,7 @@ models/*.gguf
 data/private
 secrets.toml
 .streamlit
+
+# Stress test results
+tests/stress_results/
+tests/stress_results/charts/

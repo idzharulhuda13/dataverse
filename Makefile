@@ -1,19 +1,27 @@
-.PHONY: help install run clean tunnel all stop
+.PHONY: help install run clean tunnel all stop test stress-test
 
 help:
 	@echo "Makefile commands:"
-	@echo "  install    Install dependencies"
-	@echo "  run        Run the application"
-	@echo "  clean      Clean up generated files"
-	@echo "  tunnel     Start ngrok tunnel"
-	@echo "  all        Run application and start ngrok tunnel"
-	@echo "  stop       Stop running application and tunnel"
+	@echo "  install       Install dependencies"
+	@echo "  run           Run the application"
+	@echo "  test          Run unit tests"
+	@echo "  stress-test   Run agent stress test (5 questions, saves report)"
+	@echo "  clean         Clean up generated files"
+	@echo "  tunnel        Start ngrok tunnel"
+	@echo "  all           Run application and start ngrok tunnel"
+	@echo "  stop          Stop running application and tunnel"
 
 install:
 	uv sync
 
 run:
 	uv run streamlit run streamlit_agent_dashboard.py
+
+test:
+	uv run pytest
+
+stress-test:
+	uv run python tests/stress_test.py
 
 clean:
 	rm -rf __pycache__
