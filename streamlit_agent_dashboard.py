@@ -480,7 +480,6 @@ else:
             uploaded_files = getattr(prompt, "files", []) if hasattr(prompt, "files") else []
 
             # Handle new file uploads (re-upload mid-session)
-            append_data_context = ""
             if uploaded_files:
                 uploaded_file = uploaded_files[0]
                 df, error = load_dataframe(uploaded_file)
@@ -492,11 +491,6 @@ else:
                     st.session_state.modified_df.info(buf=buf)
                     df_info = buf.getvalue()
                     df_head = st.session_state.modified_df.head(10).to_string()  # type: ignore
-                    append_data_context = (
-                        f"\n\n[System Context]: The user just uploaded a new dataset. "
-                        f"Here is the DataFrame Info:\n{df_info}\n\n"
-                        f"And a sample (head):\n{df_head}\nAssume it is loaded as `df`."
-                    )
 
             # Enrich the query via direct Gemini API call
             enriched_question = user_text  # fallback
@@ -508,7 +502,7 @@ else:
                         enriched_question = user_text  # graceful fallback to raw query
 
             # The actual prompt we send to the LLM
-            llm_prompt = enriched_question + append_data_context
+            llm_prompt = enriched_question
 
             with st.chat_message("user"):
                 st.markdown(user_text)

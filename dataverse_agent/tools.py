@@ -181,7 +181,34 @@ def create_visualization(chart_type: str, x_column: str, y_column: str = None, h
     ax.set_facecolor(BG_COLOR)
     
     try:
-        palette = PALETTE if hue else [HIGHLIGHT]
+        # Prevent Seaborn warning: "Passing palette without assigning hue is deprecated"
+        use_legend = True if hue else False
+        plot_hue = hue
+        
+        if chart_type in ('bar', 'box', 'violin'):
+            is_horizontal = (
+                y_column is not None
+                and pd.api.types.is_numeric_dtype(df[x_column])
+                and not pd.api.types.is_numeric_dtype(df[y_column])
+            )
+            cat_col = y_column if is_horizontal else x_column
+        else:
+            cat_col = x_column
+            
+        # For bar and hist, mapping hue to the categorical column resolves warnings safely
+        if not hue and chart_type in ('bar', 'hist'):
+            plot_hue = cat_col
+
+        # Ensure palette safely covers all categories
+        if not hue:
+            num_categories = df[plot_hue].nunique() if plot_hue and plot_hue in df.columns else 1
+            palette = [HIGHLIGHT] * max(1, num_categories)
+        else:
+            num_categories = df[hue].nunique() if hue in df.columns else len(PALETTE)
+            if num_categories > len(PALETTE):
+                palette = (PALETTE * ((num_categories // len(PALETTE)) + 1))[:num_categories]
+            else:
+                palette = PALETTE[:max(1, num_categories)]
         
         if chart_type == 'bar':
             # Determine bar orientation: horizontal if x is numeric and y is categorical
@@ -210,16 +237,16 @@ def create_visualization(chart_type: str, x_column: str, y_column: str = None, h
             error_bar_config = ("ci", 95) if estimator == "mean" else None
 
             if is_horizontal:
-                sns.barplot(data=df, x=x_column, y=y_column, hue=hue, palette=palette, ax=ax,
+                sns.barplot(data=df, x=x_column, y=y_column, hue=plot_hue, palette=palette, ax=ax,
                             edgecolor="none", saturation=0.95, estimator=estimator,
-                            errorbar=error_bar_config, order=bar_order)
+                            errorbar=error_bar_config, order=bar_order, legend=use_legend)
                 for container in ax.containers:
                     labels = [_human_format(v.get_width()) for v in container]
                     ax.bar_label(container, labels=labels, fontsize=9, color=CAPTION_COLOR, padding=3)
             else:
-                sns.barplot(data=df, x=x_column, y=y_column, hue=hue, palette=palette, ax=ax,
+                sns.barplot(data=df, x=x_column, y=y_column, hue=plot_hue, palette=palette, ax=ax,
                             edgecolor="none", saturation=0.95, estimator=estimator,
-                            errorbar=error_bar_config, order=bar_order)
+                            errorbar=error_bar_config, order=bar_order, legend=use_legend)
                 for container in ax.containers:
                     labels = [_human_format(v.get_height()) for v in container]
                     ax.bar_label(container, labels=labels, fontsize=9, color=CAPTION_COLOR, padding=3)
@@ -229,11 +256,15 @@ def create_visualization(chart_type: str, x_column: str, y_column: str = None, h
             if estimator == "mean":
                 error_config = None if (hue and df[hue].nunique() > 3) else "sd"
 
-            sns.lineplot(data=df, x=x_column, y=y_column, hue=hue, palette=palette, ax=ax, linewidth=2.5, marker="o", markersize=6, estimator=estimator, errorbar=error_config)
+            if plot_hue:
+                sns.lineplot(data=df, x=x_column, y=y_column, hue=plot_hue, palette=palette, ax=ax, linewidth=2.5, marker="o", markersize=6, estimator=estimator, errorbar=error_config, legend=use_legend)
+            else:
+                # Use scalar color to avoid palette without hue warnings
+                sns.lineplot(data=df, x=x_column, y=y_column, color=HIGHLIGHT, ax=ax, linewidth=2.5, marker="o", markersize=6, estimator=estimator, errorbar=error_config)
         elif chart_type == 'scatter':
-            sns.scatterplot(data=df, x=x_column, y=y_column, hue=hue, palette=palette, ax=ax, s=70, alpha=0.8, edgecolor="white", linewidth=0.5)
+            sns.scatterplot(data=df, x=x_column, y=y_column, hue=plot_hue, palette=palette, ax=ax, s=70, alpha=0.8, edgecolor="white", linewidth=0.5, legend=use_legend)
         elif chart_type == 'hist':
-            sns.histplot(data=df, x=x_column, hue=hue, palette=palette, ax=ax, kde=True, edgecolor="white", linewidth=0.5, alpha=0.75)
+            sns.histplot(data=df, x=x_column, hue=plot_hue, palette=palette, ax=ax, kde=True, edgecolor="white", linewidth=0.5, alpha=0.75, legend=use_legend)
         elif chart_type == 'box':
             sns.boxplot(data=df, x=x_column, y=y_column, hue=hue, palette=palette, ax=ax, linewidth=1.2, flierprops=dict(marker="o", markersize=4, alpha=0.5))
         elif chart_type == 'violin':

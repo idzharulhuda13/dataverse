@@ -25,6 +25,7 @@ import os
 import re as _re
 import sys
 import time
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -149,7 +150,7 @@ class TestResult:
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 # Default delay between questions (seconds) to avoid API rate limits
-DEFAULT_INTER_QUESTION_DELAY = 45
+DEFAULT_INTER_QUESTION_DELAY = 15
 
 # Retry configuration for rate-limited API calls
 MAX_RETRIES = 3
@@ -165,6 +166,9 @@ class StressTestRunner:
         self.charts_dir = self.output_dir / "charts"
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.charts_dir.mkdir(parents=True, exist_ok=True)
+
+        # Suppress verbose ADK framework logging
+        logging.getLogger("google.adk").setLevel(logging.ERROR)
 
         # Load dataset
         print(f"📂 Loading dataset: {self.dataset_path}")
@@ -354,8 +358,28 @@ class StressTestRunner:
         start_time = time.time()
 
         try:
-            # Send question to agent
-            response_text = await self._send_to_agent(question.question)
+            # 1. Generate dataset context
+            buf = io.StringIO()
+            self.working_df.info(buf=buf)
+            ds_info = buf.getvalue()
+            ds_head = self.working_df.head(10).to_string()
+
+            # 2. Enrich the query
+            print(f"   ✨ Enriching query...")
+            from dataverse_agent.agents.enricher import enrich_query
+            try:
+                enriched_question = enrich_query(question.question, self.working_df)
+                print(f"      Enriched: {enriched_question}")
+            except Exception as e:
+                print(f"      ⚠️ Enrichment failed: {e}. Using raw query.")
+                enriched_question = question.question
+
+            # 3. Build final prompt
+            llm_prompt = enriched_question
+
+            # 4. Send to agent
+            print(f"   🤖 Sending to Orchestrator...")
+            response_text = await self._send_to_agent(llm_prompt)
             result.response_text = extract_non_code_text(response_text)
 
             # Retrieve generated figures
@@ -421,6 +445,31 @@ class StressTestRunner:
         print(f"   Model:   {os.getenv('GEMINI_MODEL', 'gemini-3.1-flash-lite-preview')}")
         print(f"   Time:    {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         print(f"{'━'*70}")
+
+        # Initial Cleaning Phase (to mirror Streamlit behavior)
+        print(f"\n   🧹 Running Initial Cleaning Phase...")
+        cleaning_prompt = (
+            "[INITIAL-CLEANING]\n\n"
+            "[System Context]: The user just uploaded a new dataset. "
+            "Analyze the dataset for missing values, duplicate rows, and incorrect data types. "
+            "Apply necessary corrections (e.g., filling nulls with median, dropping duplicates) "
+            "and SAVE the cleaned result to `final_df` so it persists for the user. "
+            "Report a concise summary of what was cleaned."
+        )
+        set_session_context(self.working_df)
+        try:
+            cleaning_response = await self._send_to_agent(cleaning_prompt)
+            cleaned_df = get_cleaned_df()
+            if cleaned_df is not None:
+                self.working_df = cleaned_df
+                # The baseline original_df should also reflect the cleaned version
+                self.original_df = cleaned_df.copy()
+                print(f"   ✨ Cleaning complete. New shape: {self.working_df.shape[0]} rows × {self.working_df.shape[1]} cols")
+                print(f"   Agent summary: {extract_non_code_text(cleaning_response).strip()[:200]}...")
+            else:
+                print("   ⚠️ Cleaning phase returned no new DataFrame.")
+        except Exception as e:
+            print(f"   ❌ Errror during Initial Cleaning Phase: {e}")
 
         for i, q in enumerate(questions):
             # Inter-question delay to avoid rate limiting (skip before first question)
