@@ -338,16 +338,21 @@ def safe_execute(
         raw_output = raw_output[:MAX_OUTPUT_BYTES] + "\n... [output truncated]"
     output_str = raw_output or None
 
-    # Retrieve final_df if created
+    # Retrieve viz_df (Visual Analyst temp subset) or final_df (Cleaning Agent persistent).
+    # viz_df takes priority — if present, it's the Visual Analyst's scoped filtered subset.
+    viz_df = exec_globals.get("viz_df", None)
     final_df = exec_globals.get("final_df", None)
-    if final_df is not None and not isinstance(final_df, pd.DataFrame):
-        return SandboxResult(error="'final_df' must be a DataFrame.")
+    captured_df = viz_df if viz_df is not None else final_df
+
+    if captured_df is not None and not isinstance(captured_df, pd.DataFrame):
+        var_name = "viz_df" if viz_df is not None else "final_df"
+        return SandboxResult(error=f"'{var_name}' must be a DataFrame.")
 
     # Capture matplotlib figure if any plots were created
     fig = plt.gcf() if plt.get_fignums() else None
 
     return SandboxResult(
         output=output_str,
-        dataframe=final_df,
+        dataframe=captured_df,
         figure=fig,
     )

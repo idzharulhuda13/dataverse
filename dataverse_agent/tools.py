@@ -17,18 +17,22 @@ def set_session_context(df: pd.DataFrame):
     _local.figures = []
 
 def get_session_figures() -> list:
-    """Retrieve and clear generated figures for this thread."""
+    """Retrieve and clear generated figures for this thread.
+    Also clears viz_temp_df so Visual Analyst's filtered subsets never
+    leak into the next question.
+    """
     figs = getattr(_local, "figures", [])
     _local.figures = []
+    _local.viz_temp_df = None  # ← auto-clear temp viz subset after each turn
     return figs
 
 def get_cleaned_df() -> pd.DataFrame | None:
     """Retrieve the cleaned DataFrame from the cleaning agent, if any.
-    
-    When the cleaning agent executes code that assigns to `final_df`,
-    the sandbox captures it and we store it here. The Streamlit dashboard
-    checks this after each agent run to update the session DataFrame.
-    
+
+    ONLY intended for the Cleaning Agent's persistent full-dataset
+    transformations. Visual Analyst's temporary filtered subsets are stored
+    in _local.viz_temp_df and are never returned here.
+
     Returns:
         The cleaned DataFrame, or None if no cleaning was performed.
     """
@@ -37,11 +41,17 @@ def get_cleaned_df() -> pd.DataFrame | None:
     return cleaned
 
 def _get_df() -> pd.DataFrame:
-    # Prioritize the cleaned DataFrame from a previous execution step (e.g. filtering/sorting)
-    # This enables multi-step execution: Step 1 (fallback_tool) filters -> Step 2 (viz_tool) plots the result.
+    # 1. Check for a viz-scoped temp df (from multi-step execution within
+    #    the current Visual Analyst turn — e.g. top-5 filtered subset).
+    #    This is intentionally NOT persisted to the session.
+    viz_temp = getattr(_local, "viz_temp_df", None)
+    if viz_temp is not None:
+        return viz_temp
+    # 2. Check for cleaned df (from the Cleaning Agent — persisted to session).
     cleaned = getattr(_local, "cleaned_df", None)
     if cleaned is not None:
         return cleaned
+    # 3. Fall back to the original session df.
     return getattr(_local, "df", None)
 
 def _format_label(raw: str) -> str:
@@ -97,15 +107,19 @@ def _format_label(raw: str) -> str:
 def _human_format(val, pos=None):
     """Format large numbers into human-readable strings.
     e.g. 1500 → '1.5K', 2300000 → '2.3M', 1200000000 → '1.2B'
+    Strips unnecessary trailing .0 (e.g. 500.0K → 500K).
     """
     abs_val = abs(val)
     sign = "-" if val < 0 else ""
     if abs_val >= 1_000_000_000:
-        return f"{sign}{abs_val / 1_000_000_000:.1f}B"
+        formatted = f"{abs_val / 1_000_000_000:.1f}"
+        return f"{sign}{formatted.rstrip('0').rstrip('.')}B"
     elif abs_val >= 1_000_000:
-        return f"{sign}{abs_val / 1_000_000:.1f}M"
+        formatted = f"{abs_val / 1_000_000:.1f}"
+        return f"{sign}{formatted.rstrip('0').rstrip('.')}M"
     elif abs_val >= 1_000:
-        return f"{sign}{abs_val / 1_000:.1f}K"
+        formatted = f"{abs_val / 1_000:.1f}"
+        return f"{sign}{formatted.rstrip('0').rstrip('.')}K"
     elif abs_val == 0:
         return "0"
     elif abs_val < 1:
@@ -117,7 +131,7 @@ def _percent_format(val, pos=None):
     """Format decimal values (0.0 to 1.0) as percentages (0% to 100%)."""
     return f"{val * 100:.1f}%".rstrip('0').rstrip('.') + '%'
 
-def create_visualization(chart_type: str, x_column: str, y_column: str = None, hue: str = None, estimator: str = "mean", title: str = None, subtitle: str = None) -> str:
+def create_visualization(chart_type: str, x_column: str, y_column: str = None, hue: str = None, estimator: str = "mean", title: str = None, subtitle: str = None, sort_order: str = "ascending") -> str:
     """Create a Seaborn or Matplotlib visualization from the dataset.
     
     Args:
@@ -127,7 +141,8 @@ def create_visualization(chart_type: str, x_column: str, y_column: str = None, h
         hue: The name of the column to group by color (optional).
         estimator: Statistical function to use for aggregation ('mean', 'sum', 'count', 'min', 'max'). Defaults to 'mean'.
         title: The title of the chart (e.g. "Revenue by Region").
-        subtitle: A short, insight-driven description shown below the title (e.g. "North America leads with 42% of total revenue, followed by EMEA at 28%").
+        subtitle: A descriptive label shown below the title (e.g. "Comparison of total units sold by model type").
+        sort_order: How to sort categorical bars — 'ascending' (default), 'descending', or 'none' (dataset order).
         
     Returns:
         A success message indicating the chart was created.
@@ -169,17 +184,51 @@ def create_visualization(chart_type: str, x_column: str, y_column: str = None, h
         palette = PALETTE if hue else [HIGHLIGHT]
         
         if chart_type == 'bar':
-            sns.barplot(data=df, x=x_column, y=y_column, hue=hue, palette=palette, ax=ax, edgecolor="none", saturation=0.95, estimator=estimator)
-            # Add human-readable value labels on bars
-            for container in ax.containers:
-                labels = [_human_format(v.get_height()) for v in container]
-                ax.bar_label(container, labels=labels, fontsize=9, color=CAPTION_COLOR, padding=3)
+            # Determine bar orientation: horizontal if x is numeric and y is categorical
+            is_horizontal = (
+                y_column is not None
+                and pd.api.types.is_numeric_dtype(df[x_column])
+                and not pd.api.types.is_numeric_dtype(df[y_column])
+            )
+
+            # Auto-sort categorical axis by aggregated value
+            bar_order = None
+            if not hue:
+                cat_col = y_column if is_horizontal else x_column
+                num_col = x_column if is_horizontal else y_column
+                if cat_col and num_col and cat_col in df.columns and num_col in df.columns:
+                    agg_func = estimator if estimator in ("sum", "min", "max") else "mean"
+                    ascending = sort_order != "descending"
+                    bar_order = (
+                        df.groupby(cat_col)[num_col]
+                        .agg(agg_func)
+                        .sort_values(ascending=ascending)
+                        .index.tolist()
+                    )
+
+            # Error bars are only meaningful for mean aggregations
+            error_bar_config = ("ci", 95) if estimator == "mean" else None
+
+            if is_horizontal:
+                sns.barplot(data=df, x=x_column, y=y_column, hue=hue, palette=palette, ax=ax,
+                            edgecolor="none", saturation=0.95, estimator=estimator,
+                            errorbar=error_bar_config, order=bar_order)
+                for container in ax.containers:
+                    labels = [_human_format(v.get_width()) for v in container]
+                    ax.bar_label(container, labels=labels, fontsize=9, color=CAPTION_COLOR, padding=3)
+            else:
+                sns.barplot(data=df, x=x_column, y=y_column, hue=hue, palette=palette, ax=ax,
+                            edgecolor="none", saturation=0.95, estimator=estimator,
+                            errorbar=error_bar_config, order=bar_order)
+                for container in ax.containers:
+                    labels = [_human_format(v.get_height()) for v in container]
+                    ax.bar_label(container, labels=labels, fontsize=9, color=CAPTION_COLOR, padding=3)
         elif chart_type == 'line':
-            # Dynamic Error Bars: if there are many categories in hue, disable shaded error bars for clarity
-            error_config = "sd"
-            if hue and df[hue].nunique() > 3:
-                error_config = None
-            
+            # Error bars are only meaningful for mean aggregations
+            error_config = None
+            if estimator == "mean":
+                error_config = None if (hue and df[hue].nunique() > 3) else "sd"
+
             sns.lineplot(data=df, x=x_column, y=y_column, hue=hue, palette=palette, ax=ax, linewidth=2.5, marker="o", markersize=6, estimator=estimator, errorbar=error_config)
         elif chart_type == 'scatter':
             sns.scatterplot(data=df, x=x_column, y=y_column, hue=hue, palette=palette, ax=ax, s=70, alpha=0.8, edgecolor="white", linewidth=0.5)
@@ -374,10 +423,16 @@ def execute_python_code_fallback(code: str) -> str:
             _local.figures = []
         _local.figures.append(result.figure)
     
-    # If the code produced a cleaned DataFrame (final_df), capture it
-    # This is used by the cleaning agent to persist transformations
+    # If the code produced a cleaned DataFrame (viz_df or final_df), capture it.
+    # viz_df is the Visual Analyst's temp scoped variable (never persisted to session).
+    # final_df is the Cleaning Agent's persistent variable (persisted to session via cleaned_df).
     if result.dataframe is not None:
-        _local.cleaned_df = result.dataframe
+        # Infer which agent produced this: if the code contains 'viz_df', treat as temp.
+        # Otherwise default to cleaned_df (Cleaning Agent behaviour).
+        if "viz_df" in code:
+            _local.viz_temp_df = result.dataframe
+        else:
+            _local.cleaned_df = result.dataframe
         
     output = result.output if result.output else "Code executed successfully."
     return output
