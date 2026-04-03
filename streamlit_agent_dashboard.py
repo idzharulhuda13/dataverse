@@ -244,8 +244,21 @@ def _run_agent_and_save(llm_prompt: str, user_display_text: str | None = None):
     # Check if the cleaning agent produced a transformed DataFrame
     cleaned_df = get_cleaned_df()
     if cleaned_df is not None:
-        st.session_state.modified_df = cleaned_df
-        set_session_context(cleaned_df)
+        # Sanity guard: only persist if it looks like a full-dataset transformation.
+        # A filtered subset (e.g. top-5 rows × 2 cols from Visual Analyst) will have
+        # fewer columns than the original — we should NEVER overwrite with that.
+        original_df = st.session_state.get("original_df")
+        is_safe = (
+            original_df is None  # no baseline yet (e.g. first clean on fresh upload)
+            or set(original_df.columns).issubset(set(cleaned_df.columns))  # superset of original cols
+            or len(cleaned_df.columns) >= len(st.session_state.modified_df.columns)  # at least as wide
+        )
+        if is_safe:
+            st.session_state.modified_df = cleaned_df
+            set_session_context(cleaned_df)
+        else:
+            # Visual Analyst produced a temporary filtered subset — silently discard it.
+            pass
 
     insight_text = None
 
@@ -357,6 +370,8 @@ if st.session_state.modified_df is None:
                 st.error(f"⚠️ Error loading file: {error}")
             else:
                 st.session_state.modified_df = df.copy()
+                # Immutable backup — never overwritten, used as a restore point
+                st.session_state.original_df = df.copy()
 
                 # Build the system context string
                 buf = io.StringIO()
