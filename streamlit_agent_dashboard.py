@@ -13,6 +13,7 @@ from google.genai import types
 
 from models.utils import load_dataframe, get_excel_sheet_names, extract_non_code_text, SUPPORTED_EXTENSIONS
 from dataverse_agent.agent import root_agent
+from dataverse_agent.agents.enricher import enrich_query
 from dataverse_agent.tools import set_session_context, get_session_figures, get_cleaned_df
 from dataverse_agent.messages import (
     INTRO_MESSAGES, NO_CSV_MESSAGES, SESSION_RESUMED_MESSAGES,
@@ -436,6 +437,10 @@ else:
             with st.chat_message(msg["role"]):  # type: ignore
                 st.markdown(msg["content"])  # type: ignore
 
+                # Show enriched query subtitle for user messages
+                if msg.get("enriched_query"):
+                    st.caption(f"✨ Enriched: {msg['enriched_query']}")
+
                 # Show output string from code execution
                 if "output" in msg:
                     st.markdown(f"```python\n{msg['output']}\n```")  # type: ignore
@@ -493,14 +498,29 @@ else:
                         f"And a sample (head):\n{df_head}\nAssume it is loaded as `df`."
                     )
 
+            # Enrich the query via direct Gemini API call
+            enriched_question = user_text  # fallback
+            if st.session_state.modified_df is not None:
+                with st.spinner("Enriching question..."):
+                    try:
+                        enriched_question = enrich_query(user_text, st.session_state.modified_df)
+                    except Exception:
+                        enriched_question = user_text  # graceful fallback to raw query
+
             # The actual prompt we send to the LLM
-            llm_prompt = user_text + append_data_context
+            llm_prompt = enriched_question + append_data_context
 
             with st.chat_message("user"):
                 st.markdown(user_text)
+                if enriched_question != user_text:
+                    st.caption(f"✨ Enriched: {enriched_question}")
 
             with st.spinner("Agent is thinking..."):
-                _run_agent_and_save(llm_prompt, user_display_text=user_text)
+                user_msg = {"role": "user", "content": user_text}
+                if enriched_question != user_text:
+                    user_msg["enriched_query"] = enriched_question
+                st.session_state.messages.append(user_msg)
+                _run_agent_and_save(llm_prompt)
 
             st.rerun()
 
