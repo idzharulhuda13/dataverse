@@ -23,8 +23,37 @@ def get_session_figures() -> list:
     """
     figs = getattr(_local, "figures", [])
     _local.figures = []
-    _local.viz_temp_df = None  # ← auto-clear temp viz subset after each turn
+    _local.viz_temp_df = None  # Clear temp data *after* figures are collected
     return figs
+
+def get_session_data_summary() -> str:
+    """Generate a text summary of the actual data used in the latest chart.
+    Used to ground the Vision Agent and prevent numeric hallucinations.
+    """
+    df = _get_df()
+    if df is None:
+        return ""
+    
+    # Capture a concise statistical summary
+    summary = []
+    summary.append(f"Rows: {len(df)}")
+    if not df.empty:
+        # For numeric columns, provide sum, mean, max for grounding
+        num_df = df.select_dtypes(include='number')
+        if not num_df.empty:
+            summary.append("Numeric Summary:")
+            summary.append(num_df.agg(['sum', 'mean', 'max', 'min']).to_string())
+        
+        # For categorical columns, provide top 5 values
+        cat_df = df.select_dtypes(exclude='number')
+        if not cat_df.empty:
+            summary.append("Category Samples:")
+            for col in cat_df.columns[:3]: # limit to first 3 cats
+                top_v = df[col].value_counts().head(5).to_string()
+                summary.append(f"- {col}:\n{top_v}")
+    
+    # No side-effects here to allow multiple calls if needed
+    return "\n".join(summary)
 
 def get_cleaned_df() -> pd.DataFrame | None:
     """Retrieve the cleaned DataFrame from the cleaning agent, if any.
@@ -296,7 +325,6 @@ def create_visualization(chart_type: str, x_column: str, y_column: str = None, h
             ax.set_xlabel(_format_label(x_column), fontweight="medium", labelpad=10)
             ax.set_ylabel(_format_label(y_column) if y_column else "", fontweight="medium", labelpad=10)
             
-            # Helper: detect year-like columns (e.g., 2018, 2019...) 
             def _is_year_column(col_name: str) -> bool:
                 """Check if a numeric column likely contains year values."""
                 if col_name not in df.columns:
@@ -305,17 +333,17 @@ def create_visualization(chart_type: str, x_column: str, y_column: str = None, h
                 if len(col) == 0:
                     return False
                 
-                # Check for 4-digit integers in year range
+                # Check for 4-digit integers in year range (1900-2100)
                 is_numeric = pd.api.types.is_numeric_dtype(col)
                 if not is_numeric:
                     return False
                 
-                # Use a tighter check for "year-like" behavior
-                # Years usually have low variance relative to their scale and are integers
-                return (
-                    col.between(1900, 2100).all()
-                    and (col == col.astype(int)).all()
-                )
+                # Check if values are mostly integers in the year range
+                # Use a small tolerance for floating point noise
+                is_in_range = col.between(1900, 2100).all()
+                is_mostly_int = (col % 1 == 0).all()
+                
+                return is_in_range and is_mostly_int
 
             # Helper: detect month-like columns (e.g., 1-12)
             def _is_month_column(col_name: str) -> bool:
@@ -376,9 +404,11 @@ def create_visualization(chart_type: str, x_column: str, y_column: str = None, h
             else:
                 # E.g. histograms where y-axis is the count/density
                 ax.yaxis.set_major_formatter(mticker.FuncFormatter(_human_format))
-            # Auto-rotate x labels if many ticks
-            if len(ax.get_xticklabels()) > 6:
-                plt.setp(ax.get_xticklabels(), rotation=40, ha="right", fontsize=9)
+            # Auto-rotate x labels if they are long or numerous
+            ticks = ax.get_xticklabels()
+            max_label_len = max([len(t.get_text()) for t in ticks]) if ticks else 0
+            if len(ticks) > 5 or max_label_len > 8:
+                plt.setp(ax.get_xticklabels(), rotation=35, ha="right", fontsize=9)
         
         # ── Legend Styling ───────────────────────────────────────────────
         if hue and chart_type not in ('heatmap', 'pie'):
@@ -395,11 +425,12 @@ def create_visualization(chart_type: str, x_column: str, y_column: str = None, h
         # ── Title + Subtitle Formatting (AFTER tight_layout) ─────────
         has_header = title or subtitle
         if has_header:
-            fig.subplots_adjust(top=0.86 if (title and subtitle) else 0.90)
+            # Increase top margin to prevent title/subtitle overlap with plot
+            fig.subplots_adjust(top=0.85 if (title and subtitle) else 0.88)
             if title:
-                fig.suptitle(title, fontsize=16, fontweight="bold", color=TEXT_COLOR, y=0.98, ha="center")
+                fig.suptitle(title, fontsize=17, fontweight="bold", color=TEXT_COLOR, y=0.98, ha="center")
             if subtitle:
-                sub_y = 0.935 if title else 0.97
+                sub_y = 0.93 if title else 0.96
                 fig.text(0.5, sub_y, subtitle, fontsize=11, color=CAPTION_COLOR, ha="center", style="italic")
         
         # Save figure to registry
