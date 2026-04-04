@@ -7,12 +7,7 @@ a visualization alongside its analysis — never returns text-only.
 import os
 
 from google.adk.agents import Agent
-from google.adk.tools import FunctionTool
-from dataverse_agent.tools import (
-    get_data_summary,
-    create_visualization,
-    execute_python_code_fallback,
-)
+from dataverse_agent.tools import viz_tool, summary_tool, fallback_tool
 from dataverse_agent.prompts import load_prompt
 
 visual_analyst_agent = Agent(
@@ -25,10 +20,6 @@ visual_analyst_agent = Agent(
         'and all chart types (bar, line, scatter, histogram, box, violin, heatmap, pie). '
         'Use this agent for ANY question about the data — it always shows a chart.'
     ),
-    tools=[
-        FunctionTool(func=get_data_summary),
-        FunctionTool(func=create_visualization),
-        FunctionTool(func=execute_python_code_fallback),
-    ],
+    tools=[summary_tool, viz_tool, fallback_tool],
     instruction=load_prompt('visual_analyst'),
 )
