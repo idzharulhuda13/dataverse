@@ -324,32 +324,27 @@ eval("1+1")
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 🔗 INTEGRATION: execute_python_code() backward compatibility
+# 🔗 INTEGRATION: safe_execute() end-to-end result validation
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-class TestExecutePythonCodeCompat:
-    """Verify the refactored execute_python_code still returns the expected tuple."""
+class TestSafeExecuteResults:
+    """Verify safe_execute returns correct SandboxResult fields for common cases."""
 
-    def test_success_tuple(self, sample_df):
-        from models.utils import execute_python_code
+    def test_success_result(self, sample_df):
+        result = safe_execute('print("ok")', sample_df)
+        assert not result.blocked
+        assert result.error is None
+        assert result.output == "ok"
+        assert result.figure is None
 
-        output, final_df, fig = execute_python_code('print("ok")', sample_df)
-        assert output == "ok"
-        assert final_df is None
-        assert fig is None
+    def test_blocked_result(self, sample_df):
+        result = safe_execute("import os", sample_df)
+        assert result.blocked
+        assert result.blocked_reason is not None
+        assert "os" in result.blocked_reason
 
-    def test_blocked_tuple(self, sample_df):
-        from models.utils import execute_python_code
-
-        output, final_df, fig = execute_python_code("import os", sample_df)
-        assert "🛡️" in output
-        assert final_df is None
-        assert fig is None
-
-    def test_error_tuple(self, sample_df):
-        from models.utils import execute_python_code
-
-        output, final_df, fig = execute_python_code("1/0", sample_df)
-        assert "❌" in output
-        assert final_df is None
-        assert fig is None
+    def test_runtime_error_result(self, sample_df):
+        result = safe_execute("1/0", sample_df)
+        assert not result.blocked
+        assert result.error is not None
+        assert "ZeroDivision" in result.error

@@ -65,54 +65,50 @@ class TestQuestion:
 STRESS_TEST_QUESTIONS: list[TestQuestion] = [
     TestQuestion(
         id="Q1",
-        question="How have total global Units_Sold trended from 2018 to 2025? Show me a line chart.",
-        expected_chart_type="line",
+        question="The Electric Shift: How fast are we moving away from gas cars toward electric ones? (Stacked Area Chart showing the rise of electric models like i4/iX)",
+        expected_chart_type="stacked_area",
         checks=[
             "chart_generated",
-            "estimator_sum",          # "total" → must use sum
-            "year_axis_integers",     # Years should not be in scientific notation
-            "no_hallucination",       # No specific numbers in pre-chart text
+            "estimator_sum",
+            "no_hallucination",
+            "dataset_intact",
         ],
     ),
     TestQuestion(
         id="Q2",
-        question="Which Region contributes the highest total Revenue_EUR? Show me a bar chart.",
+        question="Regional Favorites: Do people in China buy the same types of cars as people in Europe? (Side-by-side Bar Chart)",
         expected_chart_type="bar",
         checks=[
             "chart_generated",
             "estimator_sum",
-            "no_error_bars_on_sum",   # CI whiskers are meaningless on sums
-            "bars_sorted",            # Should be sorted for dominance question
+            "dataset_intact",
         ],
     ),
     TestQuestion(
         id="Q3",
-        question="What are the top 5 Model types by total units sold? Show me a horizontal bar chart.",
-        expected_chart_type="horizontal_bar",
+        question="Premium vs. Standard: Is our \"High-End\" (Premium) segment growing faster than our entry-level models? (Line Chart comparison)",
+        expected_chart_type="line",
         checks=[
             "chart_generated",
-            "top_n_filtering",        # Should use multi-step (final_df) for top 5
-            "bar_labels_valid",       # Labels should NOT show "0.8"
-            "dataset_intact",         # Original dataset must survive after this
+            "estimator_sum",
+            "dataset_intact",
         ],
     ),
     TestQuestion(
         id="Q4",
-        question="What is the average Avg_Price_EUR for each car model across the entire dataset? Show me a bar chart.",
-        expected_chart_type="bar",
+        question="Revenue vs. Volume: Are we making our money by selling a lot of cheaper cars, or a few very expensive ones? (Scatter Plot)",
+        expected_chart_type="scatter",
         checks=[
             "chart_generated",
-            "dataset_intact",         # Avg_Price_EUR column must still exist
-            "all_columns_present",    # Verify no column loss from Q3
+            "dataset_intact",
         ],
     ),
     TestQuestion(
         id="Q5",
-        question="Are there specific months where Units_Sold consistently peak? Show me a line chart by month.",
-        expected_chart_type="line",
+        question="Growth Speed: Which region has shown the fastest growth over the last three years? (Slope Chart)",
+        expected_chart_type="slope",
         checks=[
             "chart_generated",
-            "month_axis_labels",      # Months should show Jan, Feb, etc.
             "dataset_intact",
         ],
     ),
@@ -130,6 +126,8 @@ class TestResult:
     response_text: str = ""
     insight_text: str = ""
     figure_path: Optional[str] = None
+    enriched_question: str = ""
+    tool_calls: list[dict] = field(default_factory=list)
     chart_generated: bool = False
     error: Optional[str] = None
     duration_seconds: float = 0.0
@@ -195,11 +193,12 @@ class StressTestRunner:
 
         self.results: list[TestResult] = []
 
-    async def _send_to_agent(self, prompt: str) -> str:
+    async def _send_to_agent(self, prompt: str) -> tuple[str, list[dict]]:
         """Send a prompt to the agent with retry-on-rate-limit."""
         for attempt in range(MAX_RETRIES + 1):
             try:
                 final_text = ""
+                tool_calls = []
                 async for event in self.runner.run_async(
                     user_id="stress_tester",
                     session_id=self.session_id,
@@ -209,7 +208,10 @@ class StressTestRunner:
                         for p in event.content.parts:
                             if p.text:
                                 final_text += p.text
-                return final_text
+                            if hasattr(p, "function_call") and p.function_call:
+                                args_dict = dict(p.function_call.args) if hasattr(p.function_call, "args") and p.function_call.args else {}
+                                tool_calls.append({"name": p.function_call.name, "args": args_dict})
+                return final_text, tool_calls
             except Exception as e:
                 if "429" in str(e) and attempt < MAX_RETRIES:
                     delay = RETRY_BASE_DELAY * (attempt + 1)
@@ -375,6 +377,7 @@ class StressTestRunner:
             from dataverse_agent.agents.enricher import enrich_query
             try:
                 enriched_question = enrich_query(question.question, self.working_df)
+                result.enriched_question = enriched_question
                 print(f"      Enriched: {enriched_question}")
             except Exception as e:
                 print(f"      ⚠️ Enrichment failed: {e}. Using raw query.")
@@ -385,7 +388,8 @@ class StressTestRunner:
 
             # 4. Send to agent
             print(f"   🤖 Sending to Orchestrator...")
-            response_text = await self._send_to_agent(llm_prompt)
+            response_text, tool_calls = await self._send_to_agent(llm_prompt)
+            result.tool_calls = tool_calls
             result.response_text = extract_non_code_text(response_text)
 
             # Retrieve generated figures
@@ -476,7 +480,7 @@ class StressTestRunner:
         )
         set_session_context(self.working_df)
         try:
-            cleaning_response = await self._send_to_agent(cleaning_prompt)
+            cleaning_response, _ = await self._send_to_agent(cleaning_prompt)
             cleaned_df = get_cleaned_df()
             if cleaned_df is not None:
                 self.working_df = cleaned_df
@@ -603,6 +607,29 @@ class StressTestRunner:
                 ])
 
             lines.extend([""])
+            
+            # Enriched Question
+            if r.enriched_question:
+                lines.extend([
+                    "### Enriched Query",
+                    f"> {r.enriched_question}",
+                    "",
+                ])
+
+            # Tool Calls
+            if r.tool_calls:
+                lines.extend([
+                    "### Code / Tools Executed",
+                    "",
+                ])
+                for call in r.tool_calls:
+                    lines.append(f"**Tool:** `{call['name']}`")
+                    for k, v in call['args'].items():
+                        if isinstance(v, str) and '\n' in v:
+                            lines.extend([f"**`{k}`**:", "```python", v, "```"])
+                        else:
+                            lines.append(f"- **`{k}`**: `{v}`")
+                lines.append("")
 
             # Agent response
             lines.extend([
