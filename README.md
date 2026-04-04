@@ -115,8 +115,8 @@ Any attempt to bypass these restrictions results in a `🛡️ Code blocked` ale
     ├── dataverse_agent/
     │   ├── __init__.py
     │   ├── agent.py             ← Main entry point for the Multi-Agent Orchestrator
-    │   ├── agents/              ← Specialized sub-agents (Cleaning, Forecast, Visual Analyst)
-    │   ├── prompts/             ← Specific instruction prompts for each sub-agent
+    │   ├── agents/              ← Specialized sub-agents (Cleaning, Forecast, Visual Analyst, Enricher)
+    │   ├── prompts/             ← Specific instruction prompts for each agent
     │   ├── messages.py          ← Centralized chat messages (intro, no-csv, session-resume)
     │   └── tools.py             ← ADK FunctionTools for visualization and code execution
     ├── models/
@@ -126,7 +126,12 @@ Any attempt to bypass these restrictions results in a `🛡️ Code blocked` ale
     │   └── utils.py
     ├── tests/
     │   ├── __init__.py
-    │   └── test_sandbox.py      ← Comprehensive security test suite
+    │   ├── stress_test.py       ← End-to-end agent pipeline stress tester
+    │   ├── test_sandbox.py      ← Comprehensive security test suite
+    │   ├── test_tools.py        ← ADK tool unit tests
+    │   ├── test_utils.py        ← DataFrame and string utility unit tests
+    │   ├── test_load_dataframe.py ← Multi-format data loading tests
+    │   └── test_dashboard.py    ← UI integration tests
     ├── pyproject.toml
     ├── streamlit_agent_dashboard.py   ← Main AI-powered agent dashboard
     ├── streamlit_chatbot.py

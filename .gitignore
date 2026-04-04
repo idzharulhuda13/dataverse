@@ -68,3 +68,6 @@ secrets.toml
 # Stress test results
 tests/stress_results/
 tests/stress_results/charts/
+
+# Agents Skills
+.agents/skills

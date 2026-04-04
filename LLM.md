@@ -1,6 +1,6 @@
 # LLM.md — DataVerse Project Context
 
-> **Last updated:** 2026-04-01
+> **Last updated:** 2026-04-04
 > This file gives LLM coding assistants instant context about the DataVerse project so they can be productive without scanning the entire codebase.
 
 ---
@@ -54,13 +54,15 @@ DataVerse/
 │   │   ├── orchestrator.py        ← Central router agent (delegates to sub-agents)
 │   │   ├── visual_analyst.py      ← Analysis + premium chart creation
 │   │   ├── forecast.py            ← Time-series forecasting (Prophet)
-│   │   └── cleaning.py            ← Data transformations & quality
+│   │   ├── cleaning.py            ← Data transformations & quality
+│   │   └── enricher.py            ← Stateless query rewriting/alignment (direct Gemini call)
 │   └── prompts/                   ← Markdown prompt files for each agent
 │       ├── __init__.py            ← load_prompt(name) utility
 │       ├── orchestrator.md
 │       ├── visual_analyst.md
 │       ├── forecast.md
-│       └── cleaning.md
+│       ├── cleaning.md
+│       └── enricher.md
 │
 ├── models/                        ← Core utilities
 │   ├── sandbox.py                 ← 4-layer secure Python execution sandbox
@@ -69,7 +71,13 @@ DataVerse/
 │   └── *.gguf                     ← Local LLM model files (git-ignored)
 │
 ├── tests/
-│   └── test_sandbox.py            ← Security test suite for the sandbox
+│   ├── stress_test.py             ← Comprehensive agent pipeline benchmarking
+│   ├── test_sandbox.py            ← Security test suite for the sandbox
+│   ├── test_tools.py              ← ADK tool unit tests
+│   ├── test_utils.py              ← DataFrame and string utility unit tests
+│   ├── test_load_dataframe.py     ← Multi-format data loading tests
+│   ├── test_dashboard.py          ← UI integration tests
+│   └── stress_results/            ← Artifacts from stress tests
 │
 ├── data/                          ← Sample CSV datasets
 ├── .streamlit/                    ← Streamlit config + secrets.toml (git-ignored)

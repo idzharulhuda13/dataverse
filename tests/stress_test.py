@@ -390,8 +390,20 @@ class StressTestRunner:
             # Check if cleaning agent / viz agent modified the DataFrame
             cleaned_df = get_cleaned_df()
             if cleaned_df is not None:
-                self.working_df = cleaned_df
-                set_session_context(cleaned_df)
+                # Sanity guard (mirroring streamlit_agent_dashboard.py):
+                # Only persist if it looks like a full-dataset transformation.
+                # A filtered subset (e.g. top-5 rows) should NEVER overwrite the main df.
+                is_safe = (
+                    self.original_df is None
+                    or set(self.original_df.columns).issubset(set(cleaned_df.columns))
+                    or len(cleaned_df.columns) >= len(self.working_df.columns)
+                )
+                if is_safe:
+                    self.working_df = cleaned_df
+                    set_session_context(cleaned_df)
+                else:
+                    # Visual Analyst produced a temporary filtered subset — discard it.
+                    pass
 
             # Save figure if generated
             if figure:
