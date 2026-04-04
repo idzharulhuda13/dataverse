@@ -1,10 +1,8 @@
-import sys
 import threading
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import seaborn as sns
-from typing import Dict, Any
 from google.adk.tools import FunctionTool
 
 # Use threading.local to safely pass the DataFrame and Figures
@@ -158,13 +156,13 @@ def _human_format(val, pos=None):
 
 def _percent_format(val, pos=None):
     """Format decimal values (0.0 to 1.0) as percentages (0% to 100%)."""
-    return f"{val * 100:.1f}%".rstrip('0').rstrip('.') + '%'
+    return f"{val * 100:.1f}%".replace(".0%", "%")
 
 def create_visualization(chart_type: str, x_column: str, y_column: str = None, hue: str = None, estimator: str = "mean", title: str = None, subtitle: str = None, sort_order: str = "ascending") -> str:
     """Create a Seaborn or Matplotlib visualization from the dataset.
     
     Args:
-        chart_type: The type of chart ('bar', 'line', 'scatter', 'hist', 'box', 'violin', 'heatmap', 'pie').
+        chart_type: The type of chart ('bar', 'line', 'scatter', 'hist', 'box', 'violin', 'heatmap', 'pie', 'stacked_area', 'slope').
         x_column: The name of the column for the X-axis.
         y_column: The name of the column for the Y-axis (optional for some charts).
         hue: The name of the column to group by color (optional).
@@ -298,6 +296,42 @@ def create_visualization(chart_type: str, x_column: str, y_column: str = None, h
             sns.boxplot(data=df, x=x_column, y=y_column, hue=hue, palette=palette, ax=ax, linewidth=1.2, flierprops=dict(marker="o", markersize=4, alpha=0.5))
         elif chart_type == 'violin':
             sns.violinplot(data=df, x=x_column, y=y_column, hue=hue, palette=palette, ax=ax, linewidth=1, inner="box", alpha=0.85)
+        elif chart_type == 'stacked_area':
+            if hue:
+                # Pivot data for stacking: rows=X, columns=Hue, values=Y
+                pivot_df = df.pivot_table(index=x_column, columns=hue, values=y_column, aggfunc=estimator).fillna(0)
+                ax.stackplot(pivot_df.index, pivot_df.values.T, labels=pivot_df.columns, colors=palette, alpha=0.8)
+                use_legend = True
+            else:
+                # Single area chart
+                ax.fill_between(df[x_column], df[y_column] if y_column else 0, color=HIGHLIGHT, alpha=0.4)
+                ax.plot(df[x_column], df[y_column] if y_column else 0, color=HIGHLIGHT, linewidth=2)
+        elif chart_type == 'slope':
+            if not hue:
+                plt.close(fig)
+                return "Error: Slope chart requires 'hue' parameter for comparison."
+            # Filter to min and max X to enforce the two-point slope 
+            unique_x = sorted(df[x_column].unique())
+            if len(unique_x) > 2:
+                min_x, max_x = unique_x[0], unique_x[-1]
+                slope_df = df[df[x_column].isin([min_x, max_x])]
+            else:
+                slope_df = df
+                
+            pivot_df = slope_df.pivot_table(index=hue, columns=x_column, values=y_column, aggfunc=estimator).dropna()
+            if pivot_df.empty or pivot_df.shape[1] != 2:
+                plt.close(fig)
+                return "Error: Slope chart could not find two distinct X values to connect."
+            
+            x_vals = pivot_df.columns
+            for i, category in enumerate(pivot_df.index):
+                y_vals = pivot_df.loc[category].values
+                color = palette[i % len(palette)]
+                ax.plot(x_vals, y_vals, marker='o', markersize=6, label=category, color=color, linewidth=2.5)
+            
+            ax.set_xticks(x_vals)
+            ax.set_xlim(min(x_vals) - (max(x_vals)-min(x_vals))*0.1, max(x_vals) + (max(x_vals)-min(x_vals))*0.1)
+            use_legend = True
         elif chart_type == 'heatmap':
             numeric_df = df.select_dtypes(include='number')
             sns.heatmap(numeric_df.corr(), annot=True, fmt=".2f", cmap="RdYlBu_r", ax=ax, linewidths=0.5, square=True, cbar_kws={"shrink": 0.8})
@@ -413,6 +447,9 @@ def create_visualization(chart_type: str, x_column: str, y_column: str = None, h
         # ── Legend Styling ───────────────────────────────────────────────
         if hue and chart_type not in ('heatmap', 'pie'):
             legend = ax.get_legend()
+            if not legend and use_legend:
+                legend = ax.legend()
+                
             if legend:
                 legend.set_title(_format_label(hue))
                 legend.get_frame().set_facecolor(BG_COLOR)

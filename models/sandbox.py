@@ -226,7 +226,7 @@ def _build_exec_namespace(df: pd.DataFrame) -> dict:
     """
     return {
         # Data
-        "df": df,
+        "df": df.copy(),
         # Libraries
         "pd": pd,
         "np": np,
