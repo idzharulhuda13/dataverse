@@ -41,7 +41,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from models.utils import load_dataframe, extract_non_code_text
 from dataverse_agent.agent import root_agent
-from dataverse_agent.tools import set_session_context, get_session_figures, get_cleaned_df
+from dataverse_agent.tools import set_session_context, get_session_figures, get_cleaned_df, get_session_data_summary
 
 from google.adk.runners import Runner
 from google.adk.sessions.in_memory_session_service import InMemorySessionService
@@ -224,15 +224,21 @@ class StressTestRunner:
         figure.savefig(img_buf, format="png")
         img_bytes = img_buf.getvalue()
 
+        # Grounding context (actual data metrics) for the Vision agent
+        data_grounding_summary = get_session_data_summary()
+        
         insight_prompt = (
-            "You are looking at the chart you just generated. Provide a focused data insight using this strict two-part framework:\n\n"
-            "**📊 Observation (What do I see?):** What specific, factual patterns, trends, outliers, or distributions exist in the chart? "
-            "Be precise — cite numbers, percentages, or rankings where possible.\n\n"
+            "You are looking at a chart generated from the following dataset summary:\n\n"
+            "### [Reference Data Grounding]\n"
+            f"{data_grounding_summary}\n\n"
+            "---\n\n"
+            "Provide a focused data insight using this strict two-part framework:\n\n"
+            "**📊 Observation (What do I see?):** What specific, factual patterns, trends, outliers, or distributions exist in the chart?\n"
+            "Be precise — use the **Reference Data Grounding** above to cite exact numbers, percentages, or rankings where possible.\n\n"
             "**💡 Interpretation (Why does it matter?):** What is the core business or practical implication of this pattern? "
             "Consider: Is there a concentration risk? A growth opportunity? An anomaly that needs investigation?\n\n"
             "Keep it concise (2-4 sentences total). Be highly specific and avoid generic statements.\n\n"
-            "CRITICAL: Do NOT suggest any recommendations, follow-up analyses, or next steps here. "
-            "Focus purely on interpreting the visual evidence in front of you."
+            "CRITICAL: Do NOT suggest any recommendations, follow-up analyses, or next steps here. Focus purely on interpreting the visual evidence in front of you."
         )
 
         for attempt in range(MAX_RETRIES + 1):
