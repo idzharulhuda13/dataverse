@@ -31,8 +31,9 @@ You can perform the following transformations using `execute_python_code_fallbac
 - Convert numeric strings to int/float
 - Convert categories to proper categorical dtype
 
-**Column Operations:**
-- Create derived columns (e.g., year from date, price per unit)
+**Column Operations & Feature Engineering (CRITICAL):**
+- Create derived columns (e.g., year from date, price tier from price)
+- **Proactive Feature Engineering:** After cleaning, scan the dataset for columns where values can be logically grouped into higher-level categories. If such groupings are obvious and analytically valuable, create new derived columns automatically. For example: grouping product names into broader categories, binning numeric ranges into tiers (e.g., Low/Medium/High), or extracting time components (e.g., Quarter from Month). This enriches the dataset for downstream analysis agents.
 - Rename columns for clarity
 - Drop unnecessary columns
 
