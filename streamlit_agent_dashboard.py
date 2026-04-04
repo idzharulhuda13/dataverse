@@ -14,7 +14,7 @@ from google.genai import types
 from models.utils import load_dataframe, get_excel_sheet_names, extract_non_code_text, SUPPORTED_EXTENSIONS
 from dataverse_agent.agent import root_agent
 from dataverse_agent.agents.enricher import enrich_query
-from dataverse_agent.tools import set_session_context, get_session_figures, get_final_df
+from dataverse_agent.tools import set_session_context, get_session_figures, get_final_df, get_display_df
 from dataverse_agent.usage import SessionUsage
 from dataverse_agent.commands import handle_slash_command
 from dataverse_agent.messages import (
@@ -154,7 +154,15 @@ if "current_session_id" not in st.session_state:
     st.session_state.current_session_id = first_sid
     _load_session(first_sid)
 
-for key, default in [("messages", []), ("modified_df", None), ("previous_df", None), ("dashboard_items", [])]:
+for key, default in [
+    ("messages", []),
+    ("modified_df", None),
+    ("previous_df", None),
+    ("dashboard_items", []),
+    ("show_observability", False),
+    ("show_usage_budget", False),
+    ("max_budget_turns", 10)
+]:
     if key not in st.session_state:
         st.session_state[key] = default
 
@@ -288,16 +296,13 @@ with st.sidebar:
         usage = st.session_state.get('usage', SessionUsage(current_sid))
         
         # Configuration: Max Budget
-        if "max_budget_tokens" not in st.session_state:
-            st.session_state.max_budget_tokens = 500_000
-            
         new_budget = st.number_input(
-            "Max Budget (Tokens)", 
-            value=st.session_state.max_budget_tokens,
-            step=50_000,
-            help="Warning will appear when tokens exceed this limit."
+            "Max Budget (Turns)", 
+            value=st.session_state.max_budget_turns,
+            step=1,
+            help="Warning will appear when turns exceed this limit."
         )
-        st.session_state.max_budget_tokens = new_budget
+        st.session_state.max_budget_turns = new_budget
 
         # Metrics
         m_col1, m_col2 = st.columns(2)
@@ -309,28 +314,22 @@ with st.sidebar:
             st.metric("💵 Est. Cost", f"${usage.estimated_cost_usd:.4f}")
 
         # Progress/Visual Warning
-        progress = min(1.0, usage.total_tokens / st.session_state.max_budget_tokens)
-        st.progress(progress, text=f"{progress*100:.1f}% of budget")
+        progress = min(1.0, usage.turns / st.session_state.max_budget_turns)
+        st.progress(progress, text=f"{progress*100:.1f}% of turn budget")
         
-        if usage.total_tokens >= st.session_state.max_budget_tokens:
-            st.error("⚠️ Budget limit reached! Freezing further requests.")
-        elif usage.total_tokens >= st.session_state.max_budget_tokens * 0.8:
-            st.warning("🪫 Approaching budget limit soon.")
+        if usage.turns >= st.session_state.max_budget_turns:
+            st.error("⚠️ Turn limit reached! Freezing further requests.")
+        elif usage.turns >= st.session_state.max_budget_turns * 0.8:
+            st.warning("🪫 Approaching session turn limit soon.")
 
     # ── Feature Flags ─────────────────────────────────────────────────────
     st.markdown("## ⚙️ Feature Flags")
     
-    if "show_observability" not in st.session_state:
-        st.session_state.show_observability = False
-        
     st.session_state.show_observability = st.toggle(
         "🔍 Enable Agent Observability",
         value=st.session_state.get("show_observability", False),
         help="Show real-time trace of agent actions, sub-agent calls, and tool usage."
     )
-
-    if "show_usage_budget" not in st.session_state:
-        st.session_state.show_usage_budget = False
 
     st.session_state.show_usage_budget = st.toggle(
         "💰 Enable Usage & Budget Tracking",
@@ -357,8 +356,8 @@ def _run_agent_and_save(llm_prompt: str, user_display_text: str | None = None):
     current_session = st.session_state.current_session_id
 
     # Budget Check
-    if st.session_state.usage.total_tokens >= st.session_state.max_budget_tokens:
-        st.error("❌ Request blocked: Session budget exceeded. Please increase budget in the sidebar to continue.")
+    if st.session_state.usage.turns >= st.session_state.max_budget_turns:
+        st.error("❌ Request blocked: Session turn limit reached. Please increase the turn budget in the sidebar to continue.")
         return
 
     # Setup context for tools
@@ -432,6 +431,10 @@ def _run_agent_and_save(llm_prompt: str, user_display_text: str | None = None):
 
     # Check if the cleaning agent produced a transformed DataFrame
     final_df = get_final_df()
+    
+    # Check if a standalone table was produced for display
+    display_df = get_display_df()
+
     if final_df is not None:
         # Sanity guard: only persist if it looks like a full-dataset transformation.
         # A filtered subset (e.g. top-5 rows × 2 cols from Visual Analyst) will have
@@ -520,6 +523,8 @@ def _run_agent_and_save(llm_prompt: str, user_display_text: str | None = None):
         assistant_msg["figure"] = figure
     if insight_text is not None:
         assistant_msg["insight"] = insight_text
+    if display_df is not None:
+        assistant_msg["table"] = display_df
     
     # Attach observability trace if enabled
     if st.session_state.get("show_observability"):
@@ -661,13 +666,21 @@ else:
             with st.chat_message(msg["role"]):  # type: ignore
                 st.markdown(msg["content"])  # type: ignore
 
+                # Table Guardian: Detect static markdown tables and show a tip
+                if msg["role"] == "assistant" and "|" in msg["content"] and "---" in msg["content"] and "table" not in msg:
+                    st.info("💡 **Tip**: This table is static. If you need to copy data easily, ask the agent to 'Make this an interactive table'.")
+
                 # Show enriched query subtitle for user messages
                 if msg.get("enriched_query"):
                     st.caption(f"✨ Enriched: {msg['enriched_query']}")
 
                 # Show output string from code execution
                 if "output" in msg:
-                    st.markdown(f"```python\n{msg['output']}\n```")  # type: ignore
+                    if "table" in msg or "figure" in msg:
+                         with st.expander("📝 View Execution Details", expanded=False):
+                            st.markdown(f"```python\n{msg['output']}\n```")
+                    else:
+                        st.markdown(f"```python\n{msg['output']}\n```")  # type: ignore
 
                 # Show previously generated figure
                 if "figure" in msg:
@@ -679,6 +692,10 @@ else:
                 # Show generated insights
                 if msg.get("insight"):
                     st.info(f"💡 **Data Insight**: {msg['insight']}")
+
+                # Show generated standalone table (pivot tables, summaries, etc)
+                if "table" in msg:
+                    st.dataframe(msg["table"], use_container_width=True)
 
                 # ── Agent Activity Trace (Observability) ─────────────
                 if msg.get("trace"):
@@ -787,13 +804,18 @@ else:
             enriched_question = user_text  # fallback
             if st.session_state.modified_df is not None:
                 # Check budget before enrichment
-                if st.session_state.usage.total_tokens >= st.session_state.max_budget_tokens:
-                    st.error("❌ Request blocked: Session budget exceeded.")
+                if st.session_state.usage.turns >= st.session_state.max_budget_turns:
+                    st.error("❌ Request blocked: Session turn limit reached.")
                     st.stop()
 
                 with st.spinner("Enriching question..."):
                     try:
-                        enriched_question, usage = enrich_query(user_text, st.session_state.modified_df)
+                        # Pass last 5 messages for context
+                        enriched_question, usage = enrich_query(
+                            user_text, 
+                            st.session_state.modified_df,
+                            chat_history=st.session_state.messages[-5:]
+                        )
                         st.session_state.usage.record_api_call(usage)
                     except Exception:
                         enriched_question = user_text  # graceful fallback to raw query

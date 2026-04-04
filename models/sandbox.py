@@ -71,6 +71,7 @@ class SandboxResult:
     """Result of a sandboxed code execution."""
     output: Optional[str] = None
     dataframe: Optional[pd.DataFrame] = None
+    display_df: Optional[pd.DataFrame] = None
     figure: Optional[Figure] = None
     error: Optional[str] = None
     blocked: bool = False
@@ -338,15 +339,20 @@ def safe_execute(
         raw_output = raw_output[:MAX_OUTPUT_BYTES] + "\n... [output truncated]"
     output_str = raw_output or None
 
-    # Retrieve viz_df (Visual Analyst temp subset) or final_df (Cleaning Agent persistent).
+    # Retrieve viz_df (Visual Analyst temp subset), final_df (Cleaning Agent persistent),
+    # or display_df (Standalone table for chat rendering).
     # viz_df takes priority — if present, it's the Visual Analyst's scoped filtered subset.
     viz_df = exec_globals.get("viz_df", None)
     final_df = exec_globals.get("final_df", None)
+    display_df = exec_globals.get("display_df", None)
     captured_df = viz_df if viz_df is not None else final_df
 
     if captured_df is not None and not isinstance(captured_df, pd.DataFrame):
         var_name = "viz_df" if viz_df is not None else "final_df"
         return SandboxResult(error=f"'{var_name}' must be a DataFrame.")
+    
+    if display_df is not None and not isinstance(display_df, pd.DataFrame):
+        return SandboxResult(error="'display_df' must be a DataFrame.")
 
     # Capture matplotlib figure if any plots were created
     fig = plt.gcf() if plt.get_fignums() else None
@@ -354,5 +360,6 @@ def safe_execute(
     return SandboxResult(
         output=output_str,
         dataframe=captured_df,
+        display_df=display_df,
         figure=fig,
     )
