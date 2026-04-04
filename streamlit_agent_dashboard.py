@@ -161,7 +161,8 @@ for key, default in [
     ("dashboard_items", []),
     ("show_observability", False),
     ("show_usage_budget", False),
-    ("max_budget_turns", 10)
+    ("max_budget_turns", 10),
+    ("is_logged_in", False)
 ]:
     if key not in st.session_state:
         st.session_state[key] = default
@@ -172,6 +173,30 @@ for key, default in [
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 with st.sidebar:
+    st.markdown("## 🔐 Account Management")
+    
+    if not st.session_state.is_logged_in:
+        with st.container(border=True):
+            user_input = st.text_input("Username", key="login_user")
+            pass_input = st.text_input("Password", type="password", key="login_pass")
+            if st.button("Login", use_container_width=True, type="primary"):
+                admin_user = st.secrets.get("ADMIN_USERNAME")
+                admin_pass = st.secrets.get("ADMIN_PASSWORD")
+                if user_input == admin_user and pass_input == admin_pass:
+                    st.session_state.is_logged_in = True
+                    st.success("Logged in successfully!")
+                    time.sleep(0.5)
+                    st.rerun()
+                else:
+                    st.error("Invalid credentials.")
+    else:
+        with st.container(border=True):
+            st.markdown(f"Logged in as **admin**")
+            if st.button("Logout", use_container_width=True):
+                st.session_state.is_logged_in = False
+                st.rerun()
+
+    st.divider()
     st.markdown("## 🗂️ Sessions")
 
     # ── New Session Button ────────────────────────────────────────────────
@@ -325,17 +350,23 @@ with st.sidebar:
     # ── Feature Flags ─────────────────────────────────────────────────────
     st.markdown("## ⚙️ Feature Flags")
     
-    st.session_state.show_observability = st.toggle(
-        "🔍 Enable Agent Observability",
-        value=st.session_state.get("show_observability", False),
-        help="Show real-time trace of agent actions, sub-agent calls, and tool usage."
-    )
+    if st.session_state.is_logged_in:
+        st.session_state.show_observability = st.toggle(
+            "🔍 Enable Agent Observability",
+            value=st.session_state.get("show_observability", False),
+            help="Show real-time trace of agent actions, sub-agent calls, and tool usage."
+        )
 
-    st.session_state.show_usage_budget = st.toggle(
-        "💰 Enable Usage & Budget Tracking",
-        value=st.session_state.show_usage_budget,
-        help="Display token usage, API calls, and session budget configuration."
-    )
+        st.session_state.show_usage_budget = st.toggle(
+            "💰 Enable Usage & Budget Tracking",
+            value=st.session_state.show_usage_budget,
+            help="Display token usage, API calls, and session budget configuration."
+        )
+    else:
+        st.info("🔒 Login to access advanced features like Observability and Usage tracking.")
+        # Ensure they are turned off if logged out
+        st.session_state.show_observability = False
+        st.session_state.show_usage_budget = False
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
