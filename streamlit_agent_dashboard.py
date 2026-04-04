@@ -16,6 +16,7 @@ from dataverse_agent.agent import root_agent
 from dataverse_agent.agents.enricher import enrich_query
 from dataverse_agent.tools import set_session_context, get_session_figures, get_final_df
 from dataverse_agent.usage import SessionUsage
+from dataverse_agent.commands import handle_slash_command
 from dataverse_agent.messages import (
     SESSION_RESUMED_MESSAGES,
     UPLOAD_LANDING_MESSAGES,
@@ -48,6 +49,7 @@ def _create_session(name=None):
         "created_at": datetime.now(),
         "messages": [],
         "modified_df": None,
+        "previous_df": None,
         "dashboard_items": [],
         "usage": SessionUsage(sid),
     }
@@ -61,6 +63,7 @@ def _save_current_session():
         st.session_state.sessions[sid].update({
             "messages": st.session_state.messages,
             "modified_df": st.session_state.modified_df,
+            "previous_df": st.session_state.get("previous_df"),
             "dashboard_items": st.session_state.dashboard_items,
             "usage": st.session_state.usage,
         })
@@ -72,6 +75,7 @@ def _load_session(sid):
     st.session_state.current_session_id = sid
     st.session_state.messages = session["messages"]
     st.session_state.modified_df = session["modified_df"]
+    st.session_state.previous_df = session.get("previous_df")
     st.session_state.dashboard_items = session["dashboard_items"]
     st.session_state.usage = session.get("usage", SessionUsage(sid))
 
@@ -113,7 +117,7 @@ if "current_session_id" not in st.session_state:
     st.session_state.current_session_id = first_sid
     _load_session(first_sid)
 
-for key, default in [("messages", []), ("modified_df", None), ("dashboard_items", [])]:
+for key, default in [("messages", []), ("modified_df", None), ("previous_df", None), ("dashboard_items", [])]:
     if key not in st.session_state:
         st.session_state[key] = default
 
@@ -346,6 +350,8 @@ def _run_agent_and_save(llm_prompt: str, user_display_text: str | None = None):
             or len(final_df.columns) >= len(st.session_state.modified_df.columns)  # at least as wide
         )
         if is_safe:
+            # Save for undo BEFORE overwriting
+            st.session_state.previous_df = st.session_state.modified_df.copy() if st.session_state.modified_df is not None else None
             st.session_state.modified_df = final_df
             set_session_context(final_df)
         else:
@@ -577,6 +583,19 @@ else:
                         _save_current_session()
                         st.rerun()
 
+                # ── Handle Special Message Actions (e.g. Export) ───────
+                if msg.get("action") == "export":
+                    df = st.session_state.modified_df
+                    if df is not None:
+                        csv = df.to_csv(index=False).encode('utf-8')
+                        st.download_button(
+                            label="📥 Download CSV",
+                            data=csv,
+                            file_name=f"dataverse_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                            mime="text/csv",
+                            key=f"dl_{idx}"
+                        )
+
         # ── Chat Input Box ────────────────────────────────────────────────
         if prompt := st.chat_input("Ask for a visualization (attach a data file)...", accept_file="multiple"):
             user_text = (
@@ -604,6 +623,51 @@ else:
                     df_info = buf.getvalue()
                     df_head = st.session_state.modified_df.head(10).to_string()  # type: ignore
 
+            # ── Handle Slash Commands ──────────────────────────────
+            is_cmd, response = handle_slash_command(user_text, st.session_state.modified_df, st.session_state.usage)
+            if is_cmd:
+                if isinstance(response, str):
+                    st.session_state.messages.append({"role": "user", "content": user_text})
+                    st.session_state.messages.append({"role": "assistant", "content": response})
+                elif isinstance(response, dict):
+                    action = response.get("action")
+                    if action == "clear":
+                        st.session_state.messages = []
+                    elif action == "undo":
+                        st.session_state.messages.append({"role": "user", "content": user_text})
+                        if st.session_state.get("previous_df") is not None:
+                            st.session_state.modified_df = st.session_state.previous_df.copy()
+                            st.session_state.previous_df = None  # prevent double undo
+                            st.session_state.messages.append({"role": "assistant", "content": "🔄 Last operation undone."})
+                        else:
+                            st.session_state.messages.append({"role": "assistant", "content": "⚠️ Nothing to undo."})
+                    elif action == "pin":
+                        st.session_state.messages.append({"role": "user", "content": user_text})
+                        # find last assistant figure
+                        last_assistant_msg = next((m for m in reversed(st.session_state.messages) if m["role"] == "assistant" and "figure" in m), None)
+                        if last_assistant_msg:
+                            item = {
+                                "type": "figure",
+                                "figure": last_assistant_msg["figure"],
+                                "insight": last_assistant_msg.get("insight", ""),
+                            }
+                            st.session_state.dashboard_items.append(item)
+                            st.session_state.messages.append({"role": "assistant", "content": "📌 Last chart pinned to dashboard."})
+                        else:
+                            st.session_state.messages.append({"role": "assistant", "content": "⚠️ No visualizations found to pin."})
+                    elif action == "export":
+                        st.session_state.messages.append({"role": "user", "content": user_text})
+                        st.session_state.messages.append({
+                            "role": "assistant", 
+                            "content": "Prepare download...", 
+                            "action": "export",
+                            "args": response.get("args")
+                        })
+                
+                _save_current_session()
+                st.rerun()
+
+            # ── Normal Pipeline: Enrichment + Agent Run ──────────────
             # Enrich the query via direct Gemini API call
             enriched_question = user_text  # fallback
             if st.session_state.modified_df is not None:
