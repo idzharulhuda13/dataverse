@@ -15,6 +15,7 @@ from models.utils import load_dataframe, get_excel_sheet_names, extract_non_code
 from dataverse_agent.agent import root_agent
 from dataverse_agent.agents.enricher import enrich_query
 from dataverse_agent.tools import set_session_context, get_session_figures, get_cleaned_df
+from dataverse_agent.usage import SessionUsage
 from dataverse_agent.messages import (
     SESSION_RESUMED_MESSAGES,
     UPLOAD_LANDING_MESSAGES,
@@ -48,6 +49,7 @@ def _create_session(name=None):
         "messages": [],
         "modified_df": None,
         "dashboard_items": [],
+        "usage": SessionUsage(sid),
     }
     return sid
 
@@ -60,6 +62,7 @@ def _save_current_session():
             "messages": st.session_state.messages,
             "modified_df": st.session_state.modified_df,
             "dashboard_items": st.session_state.dashboard_items,
+            "usage": st.session_state.usage,
         })
 
 
@@ -70,6 +73,7 @@ def _load_session(sid):
     st.session_state.messages = session["messages"]
     st.session_state.modified_df = session["modified_df"]
     st.session_state.dashboard_items = session["dashboard_items"]
+    st.session_state.usage = session.get("usage", SessionUsage(sid))
 
 
 def _switch_session(sid):
@@ -162,7 +166,54 @@ with st.sidebar:
                 with col_info:
                     # Session switch button
                     if is_active:
-                        st.markdown(f"**{icon} {label}**")
+                        # Direct renaming toggle
+                        if "renaming_session_id" not in st.session_state:
+                            st.session_state.renaming_session_id = None
+                        
+                        # Minimalist CSS to make the edit icon look like a 'ghost' button
+                        st.markdown("""
+                            <style>
+                                div[data-testid="column"] button {
+                                    border: none !important;
+                                    background-color: transparent !important;
+                                    padding: 0 !important;
+                                    color: #64748B !important;
+                                }
+                                div[data-testid="column"] button:hover {
+                                    color: #2D3A4A !important;
+                                    background-color: #F1F5F9 !important;
+                                }
+                            </style>
+                        """, unsafe_allow_html=True)
+
+                        is_renaming = st.session_state.renaming_session_id == sid
+                        
+                        # Use a tighter column layout (0.85/0.15)
+                        name_col, edit_col = st.columns([12, 2])
+                        with name_col:
+                            if is_renaming:
+                                new_name = st.text_input(
+                                    f"Rename {sid}",
+                                    value=label,
+                                    key=f"rename_{sid}",
+                                    label_visibility="collapsed",
+                                )
+                                if new_name != label and new_name.strip():
+                                    st.session_state.sessions[sid]["name"] = new_name.strip()
+                                    st.session_state.renaming_session_id = None
+                                    st.rerun()
+                            else:
+                                st.markdown(f"**{icon} {label}**")
+                        
+                        with edit_col:
+                            # Use a cleaner icon and ghost-button style
+                            if st.button("✎" if not is_renaming else "✔", key=f"edit_btn_{sid}", help="Rename Session"):
+                                if is_renaming:
+                                    st.session_state.renaming_session_id = None
+                                else:
+                                    st.session_state.renaming_session_id = sid
+                                st.rerun()
+
                         st.caption(f"🕐 {created}  ·  {msg_count} message{'s' if msg_count != 1 else ''}")
                     else:
                         if st.button(
@@ -189,18 +240,40 @@ with st.sidebar:
                             del st.session_state.sessions[sid]
                             st.rerun()
 
-    # ── Rename Current Session ────────────────────────────────────────────
-    st.divider()
-    st.markdown("##### ✏️ Rename Current Session")
-    current_name = st.session_state.sessions.get(current_sid, {}).get("name", "")
-    new_name = st.text_input(
-        "Session name",
-        value=current_name,
-        key="rename_input",
-        label_visibility="collapsed",
+    # ── Token Usage & Budget ──────────────────────────────────────────────
+    st.markdown("## 💰 Usage & Budget")
+    
+    usage = st.session_state.get('usage', SessionUsage(current_sid))
+    
+    # Configuration: Max Budget
+    if "max_budget_tokens" not in st.session_state:
+        st.session_state.max_budget_tokens = 500_000
+        
+    new_budget = st.number_input(
+        "Max Budget (Tokens)", 
+        value=st.session_state.max_budget_tokens,
+        step=50_000,
+        help="Warning will appear when tokens exceed this limit."
     )
-    if new_name != current_name and new_name.strip():
-        st.session_state.sessions[current_sid]["name"] = new_name.strip()
+    st.session_state.max_budget_tokens = new_budget
+
+    # Metrics
+    m_col1, m_col2 = st.columns(2)
+    with m_col1:
+        st.metric("📡 API Calls", f"{usage.api_calls}")
+        st.metric("📊 Turns", f"{usage.turns}")
+    with m_col2:
+        st.metric("🪙 Tokens", f"{usage.total_tokens / 1000:.1f}K")
+        st.metric("💵 Est. Cost", f"${usage.estimated_cost_usd:.4f}")
+
+    # Progress/Visual Warning
+    progress = min(1.0, usage.total_tokens / st.session_state.max_budget_tokens)
+    st.progress(progress, text=f"{progress*100:.1f}% of budget")
+    
+    if usage.total_tokens >= st.session_state.max_budget_tokens:
+        st.error("⚠️ Budget limit reached! Freezing further requests.")
+    elif usage.total_tokens >= st.session_state.max_budget_tokens * 0.8:
+        st.warning("🪫 Approaching budget limit soon.")
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -220,6 +293,11 @@ def _run_agent_and_save(llm_prompt: str, user_display_text: str | None = None):
     runner = st.session_state.runner
     current_session = st.session_state.current_session_id
 
+    # Budget Check
+    if st.session_state.usage.total_tokens >= st.session_state.max_budget_tokens:
+        st.error("❌ Request blocked: Session budget exceeded. Please increase budget in the sidebar to continue.")
+        return
+
     # Setup context for tools
     set_session_context(st.session_state.modified_df)
 
@@ -230,6 +308,14 @@ def _run_agent_and_save(llm_prompt: str, user_display_text: str | None = None):
             session_id=current_session,
             new_message=types.Content(parts=[types.Part.from_text(text=llm_prompt)])
         ):
+            # Capture usage metadata from ADK Runner events
+            if hasattr(event, 'usage_metadata') and event.usage_metadata:
+                st.session_state.usage.record_api_call({
+                    'prompt_token_count': event.usage_metadata.prompt_token_count,
+                    'candidates_token_count': event.usage_metadata.candidates_token_count,
+                    'total_token_count': event.usage_metadata.total_token_count,
+                })
+            
             if event.content and event.content.parts:
                 for p in event.content.parts:
                     if p.text:
@@ -296,6 +382,14 @@ def _run_agent_and_save(llm_prompt: str, user_display_text: str | None = None):
                         types.Part.from_bytes(data=img_bytes, mime_type="image/png")
                     ])
                 ):
+                    # Capture usage metadata for vision second-pass
+                    if hasattr(event, 'usage_metadata') and event.usage_metadata:
+                        st.session_state.usage.record_api_call({
+                            'prompt_token_count': event.usage_metadata.prompt_token_count,
+                            'candidates_token_count': event.usage_metadata.candidates_token_count,
+                            'total_token_count': event.usage_metadata.total_token_count,
+                        })
+                    
                     if event.content and event.content.parts:
                         for p in event.content.parts:
                             if p.text:
@@ -315,6 +409,7 @@ def _run_agent_and_save(llm_prompt: str, user_display_text: str | None = None):
         assistant_msg["insight"] = insight_text
 
     st.session_state.messages.append(assistant_msg)  # type: ignore
+    st.session_state.usage.record_turn()
     _save_current_session()
 
 
@@ -503,9 +598,15 @@ else:
             # Enrich the query via direct Gemini API call
             enriched_question = user_text  # fallback
             if st.session_state.modified_df is not None:
+                # Check budget before enrichment
+                if st.session_state.usage.total_tokens >= st.session_state.max_budget_tokens:
+                    st.error("❌ Request blocked: Session budget exceeded.")
+                    st.stop()
+
                 with st.spinner("Enriching question..."):
                     try:
-                        enriched_question = enrich_query(user_text, st.session_state.modified_df)
+                        enriched_question, usage = enrich_query(user_text, st.session_state.modified_df)
+                        st.session_state.usage.record_api_call(usage)
                     except Exception:
                         enriched_question = user_text  # graceful fallback to raw query
 
