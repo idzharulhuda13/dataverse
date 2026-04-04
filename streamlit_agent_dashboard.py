@@ -16,8 +16,9 @@ from dataverse_agent.agent import root_agent
 from dataverse_agent.agents.enricher import enrich_query
 from dataverse_agent.tools import set_session_context, get_session_figures, get_cleaned_df
 from dataverse_agent.messages import (
-    INTRO_MESSAGES, NO_CSV_MESSAGES, SESSION_RESUMED_MESSAGES,
-    UPLOAD_LANDING_MESSAGES, ANALYZING_DATA_MESSAGES,
+    SESSION_RESUMED_MESSAGES,
+    UPLOAD_LANDING_MESSAGES,
+    ANALYZING_DATA_MESSAGES,
 )
 from google.adk.runners import Runner
 from google.adk.sessions.in_memory_session_service import InMemorySessionService
