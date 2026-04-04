@@ -477,6 +477,10 @@ if st.session_state.modified_df is None:
                 # Immutable backup — never overwritten, used as a restore point
                 st.session_state.original_df = df.copy()
 
+                # Automatically rename session to filename
+                current_sid = st.session_state.current_session_id
+                st.session_state.sessions[current_sid]["name"] = f"📁 {uploaded_file.name}"
+
                 # Build the system context string
                 buf = io.StringIO()
                 st.session_state.modified_df.info(buf=buf)
@@ -590,6 +594,11 @@ else:
                     st.error(f"⚠️ Error loading file: {error}")
                 else:
                     st.session_state.modified_df = df.copy()
+                    
+                    # Automatically rename session to new filename
+                    current_sid = st.session_state.current_session_id
+                    st.session_state.sessions[current_sid]["name"] = f"📁 {uploaded_file.name}"
+                    
                     buf = io.StringIO()
                     st.session_state.modified_df.info(buf=buf)
                     df_info = buf.getvalue()
