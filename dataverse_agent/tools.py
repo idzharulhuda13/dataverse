@@ -13,6 +13,7 @@ def set_session_context(df: pd.DataFrame):
     """Register the dataframe and a fresh figure store for the current thread."""
     _local.df = df
     _local.figures = []
+    _local.display_df = None
 
 def get_session_figures() -> list:
     """Retrieve and clear generated figures for this thread.
@@ -68,6 +69,16 @@ def get_final_df() -> pd.DataFrame | None:
     """
     result = getattr(_local, "final_df", None)
     _local.final_df = None  # clear after retrieval
+    return result
+
+def get_display_df() -> pd.DataFrame | None:
+    """Retrieve the standalone table (display_df) for chat rendering, if any.
+    
+    Used for one-off tables like pivot tables that should be shown in the chat
+    but not replace the main dataset.
+    """
+    result = getattr(_local, "display_df", None)
+    _local.display_df = None  # clear after retrieval
     return result
 
 def _get_df() -> pd.DataFrame:
@@ -525,9 +536,10 @@ def execute_python_code_fallback(code: str) -> str:
             _local.figures = []
         _local.figures.append(result.figure)
     
-    # If the code produced a DataFrame (viz_df or final_df), capture it.
+    # If the code produced a DataFrame (viz_df, final_df, or display_df), capture it.
     # viz_df → Visual Analyst's temp scoped variable (never persisted to session).
     # final_df → Cleaning Agent's persistent variable (persisted to session).
+    # display_df → Standalone table for chat rendering (not persisted to session df).
     if result.dataframe is not None:
         # Infer which agent produced this: if the code contains 'viz_df', treat as temp.
         # Otherwise store as final_df (Cleaning Agent behaviour).
@@ -535,12 +547,48 @@ def execute_python_code_fallback(code: str) -> str:
             _local.viz_temp_df = result.dataframe
         else:
             _local.final_df = result.dataframe
+    
+    if result.display_df is not None:
+        _local.display_df = result.display_df
         
     output = result.output if result.output else "Code executed successfully."
     return output
 
+def create_table(table_code: str, title: str = None, subtitle: str = None) -> str:
+    """Generate an interactive, copyable table using Python code.
+    The code should result in a pandas DataFrame assigned to a variable named `display_df`.
+    
+    Args:
+        table_code: Python code to generate the table. Must assign the result to `display_df`.
+        title: The title of the table (e.g. "Monthly Sales Performance").
+        subtitle: A descriptive label shown below the title.
+    """
+    from models.sandbox import safe_execute
+    
+    df = _get_df()
+    if df is None:
+        return "Error: No dataset loaded."
+        
+    # Ensure the code assigns to display_df for the sandbox to capture it correctly
+    if "display_df =" not in table_code:
+        table_code = f"display_df = {table_code}"
+        
+    result = safe_execute(table_code, df)
+    
+    if result.blocked:
+        return f"Table creation blocked: {result.blocked_reason}"
+    if result.error:
+        return f"Error creating table: {result.error}"
+        
+    if result.display_df is not None:
+        _local.display_df = result.display_df
+        return f"Table '{title or 'Data Summary'}' created successfully."
+        
+    return "Error: The code did not produce a valid table."
+
 viz_tool = FunctionTool(func=create_visualization)
 summary_tool = FunctionTool(func=get_data_summary)
+table_tool = FunctionTool(func=create_table)
 fallback_tool = FunctionTool(func=execute_python_code_fallback)
 
-TOOLS = [viz_tool, summary_tool, fallback_tool]
+TOOLS = [viz_tool, summary_tool, table_tool, fallback_tool]

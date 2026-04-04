@@ -28,23 +28,36 @@ def _get_client() -> genai.Client:
     return _client
 
 
-def enrich_query(user_text: str, df: pd.DataFrame) -> tuple[str, dict]:
+def enrich_query(user_text: str, df: pd.DataFrame, chat_history: list[dict] = None) -> tuple[str, dict]:
     """Rewrite a vague user query into a specific analytical prompt.
 
     Args:
         user_text: The raw user query.
         df: The current DataFrame for schema context.
+        chat_history: Optional list of recent messages for context.
 
     Returns:
         A tuple of (enriched_query_string, usage_metadata_dict).
     """
+    # Build compact chat history context
+    history_context = ""
+    if chat_history:
+        history_context = "Conversation History (last 5 turns):\n"
+        for msg in chat_history[-5:]:
+            role = msg.get("role", "user").capitalize()
+            content = msg.get("content", "")
+            # Filter out potentially large technical fields for the enricher
+            history_context += f"- {role}: {content[:500]}\n"
+        history_context += "\n"
+
     # Build compact dataset context
     buf = io.StringIO()
     df.info(buf=buf)
     df_context = f"Columns & types:\n{buf.getvalue()}\n\nSample (first 5 rows):\n{df.head(5).to_string()}"
 
     user_prompt = (
-        f"Raw query: {user_text}\n\n"
+        f"{history_context}"
+        f"Raw user query: {user_text}\n\n"
         f"Dataset:\n{df_context}"
     )
 

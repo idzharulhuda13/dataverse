@@ -10,6 +10,7 @@ from google.adk.agents import Agent
 from dataverse_agent.agents.visual_analyst import visual_analyst_agent
 from dataverse_agent.agents.forecast import forecast_agent
 from dataverse_agent.agents.cleaning import cleaning_agent
+from dataverse_agent.tools import table_tool
 from dataverse_agent.prompts import load_prompt
 
 orchestrator = Agent(
@@ -20,5 +21,6 @@ orchestrator = Agent(
         'to specialist agents for analysis, visualization, forecasting, and data cleaning.'
     ),
     sub_agents=[visual_analyst_agent, forecast_agent, cleaning_agent],
+    tools=[table_tool],
     instruction=load_prompt('orchestrator'),
 )
