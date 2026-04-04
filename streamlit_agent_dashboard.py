@@ -69,6 +69,43 @@ def _save_current_session():
         })
 
 
+def _render_activity_trace(trace: list):
+    """Renders a specific trace in a collapsed expander."""
+    if not st.session_state.get("show_observability") or not trace:
+        return
+
+    with st.expander("🔍 Agent Activity Trace", expanded=False):
+        st.caption("Real-time log of agent actions, sub-agent calls, and tool usage.")
+        
+        for event in trace:
+            timestamp = event.timestamp.strftime("%H:%M:%S")
+            icon = "🤖"
+            if event.event_type == "tool_call":
+                icon = "🛠️"
+            elif event.event_type.startswith("vision"):
+                icon = "👁️"
+            elif event.event_type == "start":
+                icon = "🚀"
+            elif event.event_type == "complete":
+                icon = "✅"
+
+            # Display event header
+            st.markdown(f"**{icon} {event.agent_name.title()}** `{timestamp}`")
+            st.info(event.detail)
+            
+            # Show code if available in metadata
+            if event.metadata and "args" in event.metadata:
+                args = event.metadata["args"]
+                code = args.get("code") or args.get("python_code") or args.get("script")
+                if code:
+                    st.code(code, language="python")
+                else:
+                    st.json(args)
+            
+            st.divider()
+            
+
+
 def _load_session(sid):
     """Load a session's state into the working session_state keys."""
     session = st.session_state.sessions[sid]
@@ -245,39 +282,61 @@ with st.sidebar:
                             st.rerun()
 
     # ── Token Usage & Budget ──────────────────────────────────────────────
-    st.markdown("## 💰 Usage & Budget")
-    
-    usage = st.session_state.get('usage', SessionUsage(current_sid))
-    
-    # Configuration: Max Budget
-    if "max_budget_tokens" not in st.session_state:
-        st.session_state.max_budget_tokens = 500_000
+    if st.session_state.get("show_usage_budget", False):
+        st.markdown("## 💰 Usage & Budget")
         
-    new_budget = st.number_input(
-        "Max Budget (Tokens)", 
-        value=st.session_state.max_budget_tokens,
-        step=50_000,
-        help="Warning will appear when tokens exceed this limit."
-    )
-    st.session_state.max_budget_tokens = new_budget
+        usage = st.session_state.get('usage', SessionUsage(current_sid))
+        
+        # Configuration: Max Budget
+        if "max_budget_tokens" not in st.session_state:
+            st.session_state.max_budget_tokens = 500_000
+            
+        new_budget = st.number_input(
+            "Max Budget (Tokens)", 
+            value=st.session_state.max_budget_tokens,
+            step=50_000,
+            help="Warning will appear when tokens exceed this limit."
+        )
+        st.session_state.max_budget_tokens = new_budget
 
-    # Metrics
-    m_col1, m_col2 = st.columns(2)
-    with m_col1:
-        st.metric("📡 API Calls", f"{usage.api_calls}")
-        st.metric("📊 Turns", f"{usage.turns}")
-    with m_col2:
-        st.metric("🪙 Tokens", f"{usage.total_tokens / 1000:.1f}K")
-        st.metric("💵 Est. Cost", f"${usage.estimated_cost_usd:.4f}")
+        # Metrics
+        m_col1, m_col2 = st.columns(2)
+        with m_col1:
+            st.metric("📡 API Calls", f"{usage.api_calls}")
+            st.metric("📊 Turns", f"{usage.turns}")
+        with m_col2:
+            st.metric("🪙 Tokens", f"{usage.total_tokens / 1000:.1f}K")
+            st.metric("💵 Est. Cost", f"${usage.estimated_cost_usd:.4f}")
 
-    # Progress/Visual Warning
-    progress = min(1.0, usage.total_tokens / st.session_state.max_budget_tokens)
-    st.progress(progress, text=f"{progress*100:.1f}% of budget")
+        # Progress/Visual Warning
+        progress = min(1.0, usage.total_tokens / st.session_state.max_budget_tokens)
+        st.progress(progress, text=f"{progress*100:.1f}% of budget")
+        
+        if usage.total_tokens >= st.session_state.max_budget_tokens:
+            st.error("⚠️ Budget limit reached! Freezing further requests.")
+        elif usage.total_tokens >= st.session_state.max_budget_tokens * 0.8:
+            st.warning("🪫 Approaching budget limit soon.")
+
+    # ── Feature Flags ─────────────────────────────────────────────────────
+    st.markdown("## ⚙️ Feature Flags")
     
-    if usage.total_tokens >= st.session_state.max_budget_tokens:
-        st.error("⚠️ Budget limit reached! Freezing further requests.")
-    elif usage.total_tokens >= st.session_state.max_budget_tokens * 0.8:
-        st.warning("🪫 Approaching budget limit soon.")
+    if "show_observability" not in st.session_state:
+        st.session_state.show_observability = False
+        
+    st.session_state.show_observability = st.toggle(
+        "🔍 Enable Agent Observability",
+        value=st.session_state.get("show_observability", False),
+        help="Show real-time trace of agent actions, sub-agent calls, and tool usage."
+    )
+
+    if "show_usage_budget" not in st.session_state:
+        st.session_state.show_usage_budget = False
+
+    st.session_state.show_usage_budget = st.toggle(
+        "💰 Enable Usage & Budget Tracking",
+        value=st.session_state.show_usage_budget,
+        help="Display token usage, API calls, and session budget configuration."
+    )
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -305,6 +364,15 @@ def _run_agent_and_save(llm_prompt: str, user_display_text: str | None = None):
     # Setup context for tools
     set_session_context(st.session_state.modified_df)
 
+    # Reset trace for new request if observability enabled
+    if st.session_state.get("show_observability"):
+        st.session_state.usage.clear_trace()
+        st.session_state.usage.record_trace(
+            event_type="start",
+            agent_name="orchestrator",
+            detail=f"Processing request: {llm_prompt[:100]}..."
+        )
+
     async def generate_response():
         final_text = ""
         async for event in runner.run_async(
@@ -324,6 +392,31 @@ def _run_agent_and_save(llm_prompt: str, user_display_text: str | None = None):
                 for p in event.content.parts:
                     if p.text:
                         final_text += p.text
+                    
+                    # Observability: Record tool calls
+                    if st.session_state.get("show_observability"):
+                        if hasattr(p, "function_call") and p.function_call:
+                            # Record tool name and full code (usually in 'code' or 'python_code' arg)
+                            args = dict(p.function_call.args) if p.function_call.args else {}
+                            detail = f"Calling tool: {p.function_call.name}"
+                            st.session_state.usage.record_trace(
+                                event_type="tool_call",
+                                agent_name="agent", 
+                                detail=detail,
+                                metadata={
+                                    "tool_name": p.function_call.name,
+                                    "args": args
+                                }
+                            )
+
+        # Final record for request completion
+        if st.session_state.get("show_observability"):
+            st.session_state.usage.record_trace(
+                event_type="complete",
+                agent_name="orchestrator",
+                detail="Response generated successfully."
+            )
+        
         return final_text
 
     response_text = asyncio.run(generate_response())
@@ -378,6 +471,13 @@ def _run_agent_and_save(llm_prompt: str, user_display_text: str | None = None):
                 "Keep it concise (2-4 sentences total). Be highly specific and avoid generic statements.\n\n"
                 "CRITICAL: Do NOT suggest any recommendations, follow-up analyses, or next steps here. Focus purely on interpreting the visual evidence in front of you."
             )
+            if st.session_state.get("show_observability"):
+                st.session_state.usage.record_trace(
+                    event_type="vision_start",
+                    agent_name="vision_analyst",
+                    detail="Analyzing generated chart for insights..."
+                )
+
             async def generate_insight():
                 text = ""
                 async for event in runner.run_async(
@@ -404,6 +504,13 @@ def _run_agent_and_save(llm_prompt: str, user_display_text: str | None = None):
 
             insight_text = extract_non_code_text(asyncio.run(generate_insight()))
 
+            if st.session_state.get("show_observability"):
+                st.session_state.usage.record_trace(
+                    event_type="vision_complete",
+                    agent_name="vision_analyst",
+                    detail="Insights generated successfully."
+                )
+
     # Build assistant message
     assistant_msg = {
         "role": "assistant",
@@ -413,6 +520,11 @@ def _run_agent_and_save(llm_prompt: str, user_display_text: str | None = None):
         assistant_msg["figure"] = figure
     if insight_text is not None:
         assistant_msg["insight"] = insight_text
+    
+    # Attach observability trace if enabled
+    if st.session_state.get("show_observability"):
+        # We copy the list so it doesn't get mutated if we clear it later
+        assistant_msg["trace"] = list(st.session_state.usage.trace)
 
     st.session_state.messages.append(assistant_msg)  # type: ignore
     st.session_state.usage.record_turn()
@@ -427,7 +539,6 @@ st.title("DataVerse - Agent Dashboard Generation")
 
 # ── BRANCH: No data loaded yet → Upload-First Landing ─────────────────────
 if st.session_state.modified_df is None:
-
     st.markdown("")
     # Centered hero layout
     _left_spacer, center_col, _right_spacer = st.columns([1, 2, 1])
@@ -568,6 +679,10 @@ else:
                 # Show generated insights
                 if msg.get("insight"):
                     st.info(f"💡 **Data Insight**: {msg['insight']}")
+
+                # ── Agent Activity Trace (Observability) ─────────────
+                if msg.get("trace"):
+                    _render_activity_trace(msg["trace"])
 
                 if "figure" in msg:
                     # Add Pin button for this figure if it hasn't been pinned yet
