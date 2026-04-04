@@ -314,38 +314,56 @@ with st.sidebar:
                             del st.session_state.sessions[sid]
                             st.rerun()
 
-    # ── Token Usage & Budget ──────────────────────────────────────────────
-    if st.session_state.get("show_usage_budget", False):
-        st.markdown("## 💰 Usage & Budget")
-        
-        usage = st.session_state.get('usage', SessionUsage(current_sid))
-        
-        # Configuration: Max Budget
-        new_budget = st.number_input(
-            "Max Budget (Turns)", 
-            value=st.session_state.max_budget_turns,
-            step=1,
-            help="Warning will appear when turns exceed this limit."
-        )
-        st.session_state.max_budget_turns = new_budget
+    # ── Usage & Progress ──────────────────────────────────────────────────
+    usage = st.session_state.get('usage', SessionUsage(current_sid))
+    max_turns = st.session_state.max_budget_turns
+    used_turns = usage.turns
+    remaining_turns = max(0, max_turns - used_turns)
+    remaining_pct = int((remaining_turns / max_turns) * 100) if max_turns > 0 else 0
+    progress_val = min(1.0, used_turns / max_turns) if max_turns > 0 else 1.0
 
-        # Metrics
-        m_col1, m_col2 = st.columns(2)
-        with m_col1:
-            st.metric("📡 API Calls", f"{usage.api_calls}")
-            st.metric("📊 Turns", f"{usage.turns}")
-        with m_col2:
-            st.metric("🪙 Tokens", f"{usage.total_tokens / 1000:.1f}K")
-            st.metric("💵 Est. Cost", f"${usage.estimated_cost_usd:.4f}")
+    if st.session_state.is_logged_in:
+        # ── Full Admin Dashboard (Toggled)
+        if st.session_state.get("show_usage_budget", False):
+            st.markdown("## 💰 Usage & Budget")
+            
+            # Configuration: Max Budget
+            new_budget = st.number_input(
+                "Max Budget (Turns)", 
+                value=max_turns,
+                min_value=1,
+                step=1,
+                help="Warning will appear when turns exceed this limit."
+            )
+            st.session_state.max_budget_turns = new_budget
 
-        # Progress/Visual Warning
-        progress = min(1.0, usage.turns / st.session_state.max_budget_turns)
-        st.progress(progress, text=f"{progress*100:.1f}% of turn budget")
+            # Metrics
+            m_col1, m_col2 = st.columns(2)
+            with m_col1:
+                st.metric("📡 API Calls", f"{usage.api_calls}")
+                st.metric("📊 Turns", f"{usage.turns}")
+            with m_col2:
+                st.metric("🪙 Tokens", f"{usage.total_tokens / 1000:.1f}K")
+                st.metric("💵 Est. Cost", f"${usage.estimated_cost_usd:.4f}")
+
+            # Progress/Visual Warning
+            st.progress(progress_val, text=f"{remaining_turns} turns remaining ({remaining_pct}%)")
+            
+            if used_turns >= max_turns:
+                st.error("⚠️ Turn limit reached! Freezing further requests.")
+            elif used_turns >= max_turns * 0.8:
+                st.warning("🪫 Approaching session turn limit soon.")
+    else:
+        # ── Guest Countdown Tracker (Always Visible)
+        st.markdown("## ⏳ Session Status")
+        st.markdown(f"**{remaining_turns}** turns remaining ({remaining_pct}%)")
+        st.progress(progress_val)
         
-        if usage.turns >= st.session_state.max_budget_turns:
-            st.error("⚠️ Turn limit reached! Freezing further requests.")
-        elif usage.turns >= st.session_state.max_budget_turns * 0.8:
-            st.warning("🪫 Approaching session turn limit soon.")
+        if used_turns >= max_turns:
+            st.error("⚠️ Turn limit reached!")
+            st.caption("🔒 Login as admin to increase limit.")
+        elif used_turns >= max_turns * 0.8:
+            st.warning("🪫 Low turn budget.")
 
     # ── Feature Flags ─────────────────────────────────────────────────────
     st.markdown("## ⚙️ Feature Flags")
