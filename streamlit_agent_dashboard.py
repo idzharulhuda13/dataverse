@@ -14,7 +14,7 @@ from google.genai import types
 from models.utils import load_dataframe, get_excel_sheet_names, extract_non_code_text, SUPPORTED_EXTENSIONS
 from dataverse_agent.agent import root_agent
 from dataverse_agent.agents.enricher import enrich_query
-from dataverse_agent.tools import set_session_context, get_session_figures, get_cleaned_df
+from dataverse_agent.tools import set_session_context, get_session_figures, get_final_df
 from dataverse_agent.usage import SessionUsage
 from dataverse_agent.messages import (
     SESSION_RESUMED_MESSAGES,
@@ -334,20 +334,20 @@ def _run_agent_and_save(llm_prompt: str, user_display_text: str | None = None):
     data_grounding_summary = get_session_data_summary()
 
     # Check if the cleaning agent produced a transformed DataFrame
-    cleaned_df = get_cleaned_df()
-    if cleaned_df is not None:
+    final_df = get_final_df()
+    if final_df is not None:
         # Sanity guard: only persist if it looks like a full-dataset transformation.
         # A filtered subset (e.g. top-5 rows × 2 cols from Visual Analyst) will have
         # fewer columns than the original — we should NEVER overwrite with that.
         original_df = st.session_state.get("original_df")
         is_safe = (
             original_df is None  # no baseline yet (e.g. first clean on fresh upload)
-            or set(original_df.columns).issubset(set(cleaned_df.columns))  # superset of original cols
-            or len(cleaned_df.columns) >= len(st.session_state.modified_df.columns)  # at least as wide
+            or set(original_df.columns).issubset(set(final_df.columns))  # superset of original cols
+            or len(final_df.columns) >= len(st.session_state.modified_df.columns)  # at least as wide
         )
         if is_safe:
-            st.session_state.modified_df = cleaned_df
-            set_session_context(cleaned_df)
+            st.session_state.modified_df = final_df
+            set_session_context(final_df)
         else:
             # Visual Analyst produced a temporary filtered subset — silently discard it.
             pass

@@ -200,12 +200,12 @@ def test_get_session_figures_handling():
     plt.close(fig1)
     plt.close(fig2)
 
-def test_get_cleaned_df_handling(bmw_df):
-    """Verify cleaned_df is retrieved and cleared."""
-    _local.cleaned_df = bmw_df
-    from dataverse_agent.tools import get_cleaned_df
-    assert get_cleaned_df() is bmw_df
-    assert get_cleaned_df() is None
+def test_get_final_df_handling(bmw_df):
+    """Verify final_df is retrieved and cleared."""
+    _local.final_df = bmw_df
+    from dataverse_agent.tools import get_final_df
+    assert get_final_df() is bmw_df
+    assert get_final_df() is None
 
 def test_get_data_summary(bmw_df):
     """Verify the summary string describes the current dataframe."""
@@ -231,9 +231,9 @@ def test_execute_python_code_fallback_success(bmw_df):
     output = execute_python_code_fallback(code)
     
     assert "Hello Fallback" in output
-    # Verify cleaned_df was updated in _local
-    from dataverse_agent.tools import get_cleaned_df
-    cleaned = get_cleaned_df()
+    # Verify final_df was updated in _local
+    from dataverse_agent.tools import get_final_df
+    cleaned = get_final_df()
     assert cleaned is not None
     assert 'new_col' in cleaned.columns
 

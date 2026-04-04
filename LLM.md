@@ -156,7 +156,7 @@ Three FunctionTools registered with ADK:
 **Thread-local state management:**
 - `set_session_context(df)` — registers DataFrame + fresh figures list for current thread
 - `get_session_figures()` — retrieves and clears generated figures
-- `get_cleaned_df()` — retrieves cleaned DataFrame from cleaning agent (if any)
+- `get_final_df()` — retrieves persisted DataFrame (`final_df`) from cleaning agent (if any)
 
 ### `models/sandbox.py` — 4-Layer Security Sandbox
 
@@ -188,7 +188,7 @@ Public API: `safe_execute(code, df, timeout=30) → SandboxResult`
 **Sections:**
 1. **Session State Init** — API key from `st.secrets`, ADK `Runner` + `InMemorySessionService`
 2. **Sidebar Session Manager** — Create / switch / rename / delete sessions. Each session stores: messages, modified_df, dashboard_items
-3. **`_run_agent_and_save()`** — Core function: sends prompt to ADK runner, captures response + figures + cleaned_df. Does a **second pass** for chart insights (sends chart image back to LLM)
+3. **`_run_agent_and_save()`** — Core function: sends prompt to ADK runner, captures response + figures + final_df. Does a **second pass** for chart insights (sends chart image back to LLM)
 4. **Upload-First Landing** — If no data loaded, shows centered file uploader hero. On upload, auto-triggers agent analysis
 5. **Chat + Dashboard Layout** — 4:6 column split. Left: chat with pin buttons. Right: 2-column pinned dashboard grid
 
@@ -264,7 +264,7 @@ Tests are in `tests/test_sandbox.py` — comprehensive security tests for the sa
 ## Important Patterns & Conventions
 
 1. **Thread-local storage** — The DataFrame and figures are passed between Streamlit's main thread and ADK tool execution via `threading.local()` in `tools.py`
-2. **Cleaning agent persistence** — When cleaning agent code assigns to `final_df`, the sandbox captures it via `exec_globals.get("final_df")`, and the dashboard updates `st.session_state.modified_df`
+2. **Cleaning agent persistence** — When cleaning agent code assigns to `final_df`, the sandbox captures it via `exec_globals.get("final_df")`, and the dashboard retrieves it via `get_final_df()` then updates `st.session_state.modified_df`
 3. **Second-pass insights** — After each chart is generated, the dashboard sends the chart image back to the LLM for a focused data insight (observation + interpretation)
 4. **Self-correcting retry** — Errors from tool execution are fed back to the LLM for autonomous code fixing
 5. **Prompt-as-markdown** — Agent prompts are `.md` files loaded at import time, not Python strings

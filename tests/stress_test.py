@@ -41,7 +41,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from models.utils import load_dataframe, extract_non_code_text
 from dataverse_agent.agent import root_agent
-from dataverse_agent.tools import set_session_context, get_session_figures, get_cleaned_df, get_session_data_summary
+from dataverse_agent.tools import set_session_context, get_session_figures, get_final_df, get_session_data_summary
 
 from google.adk.runners import Runner
 from google.adk.sessions.in_memory_session_service import InMemorySessionService
@@ -397,20 +397,20 @@ class StressTestRunner:
             figure = figures[-1] if figures else None
             result.chart_generated = figure is not None
 
-            # Check if cleaning agent / viz agent modified the DataFrame
-            cleaned_df = get_cleaned_df()
-            if cleaned_df is not None:
+            # Check if cleaning agent produced a persisted final_df
+            final_df = get_final_df()
+            if final_df is not None:
                 # Sanity guard (mirroring streamlit_agent_dashboard.py):
                 # Only persist if it looks like a full-dataset transformation.
                 # A filtered subset (e.g. top-5 rows) should NEVER overwrite the main df.
                 is_safe = (
                     self.original_df is None
-                    or set(self.original_df.columns).issubset(set(cleaned_df.columns))
-                    or len(cleaned_df.columns) >= len(self.working_df.columns)
+                    or set(self.original_df.columns).issubset(set(final_df.columns))
+                    or len(final_df.columns) >= len(self.working_df.columns)
                 )
                 if is_safe:
-                    self.working_df = cleaned_df
-                    set_session_context(cleaned_df)
+                    self.working_df = final_df
+                    set_session_context(final_df)
                 else:
                     # Visual Analyst produced a temporary filtered subset — discard it.
                     pass
@@ -481,11 +481,11 @@ class StressTestRunner:
         set_session_context(self.working_df)
         try:
             cleaning_response, _ = await self._send_to_agent(cleaning_prompt)
-            cleaned_df = get_cleaned_df()
-            if cleaned_df is not None:
-                self.working_df = cleaned_df
+            final_df = get_final_df()
+            if final_df is not None:
+                self.working_df = final_df
                 # The baseline original_df should also reflect the cleaned version
-                self.original_df = cleaned_df.copy()
+                self.original_df = final_df.copy()
                 print(f"   ✨ Cleaning complete. New shape: {self.working_df.shape[0]} rows × {self.working_df.shape[1]} cols")
                 print(f"   Agent summary: {extract_non_code_text(cleaning_response).strip()[:200]}...")
             else:

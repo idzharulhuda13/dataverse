@@ -53,19 +53,22 @@ def get_session_data_summary() -> str:
     # No side-effects here to allow multiple calls if needed
     return "\n".join(summary)
 
-def get_cleaned_df() -> pd.DataFrame | None:
-    """Retrieve the cleaned DataFrame from the cleaning agent, if any.
+def get_final_df() -> pd.DataFrame | None:
+    """Retrieve the persisted DataFrame (final_df) from the cleaning agent, if any.
 
     ONLY intended for the Cleaning Agent's persistent full-dataset
     transformations. Visual Analyst's temporary filtered subsets are stored
     in _local.viz_temp_df and are never returned here.
 
+    The name mirrors the sandbox variable `final_df` that the cleaning agent
+    prompt instructs the LLM to assign to.
+
     Returns:
-        The cleaned DataFrame, or None if no cleaning was performed.
+        The persisted DataFrame, or None if no cleaning was performed.
     """
-    cleaned = getattr(_local, "cleaned_df", None)
-    _local.cleaned_df = None  # clear after retrieval
-    return cleaned
+    result = getattr(_local, "final_df", None)
+    _local.final_df = None  # clear after retrieval
+    return result
 
 def _get_df() -> pd.DataFrame:
     # 1. Check for a viz-scoped temp df (from multi-step execution within
@@ -74,10 +77,10 @@ def _get_df() -> pd.DataFrame:
     viz_temp = getattr(_local, "viz_temp_df", None)
     if viz_temp is not None:
         return viz_temp
-    # 2. Check for cleaned df (from the Cleaning Agent — persisted to session).
-    cleaned = getattr(_local, "cleaned_df", None)
-    if cleaned is not None:
-        return cleaned
+    # 2. Check for final_df (from the Cleaning Agent — persisted to session).
+    final = getattr(_local, "final_df", None)
+    if final is not None:
+        return final
     # 3. Fall back to the original session df.
     return getattr(_local, "df", None)
 
@@ -522,16 +525,16 @@ def execute_python_code_fallback(code: str) -> str:
             _local.figures = []
         _local.figures.append(result.figure)
     
-    # If the code produced a cleaned DataFrame (viz_df or final_df), capture it.
-    # viz_df is the Visual Analyst's temp scoped variable (never persisted to session).
-    # final_df is the Cleaning Agent's persistent variable (persisted to session via cleaned_df).
+    # If the code produced a DataFrame (viz_df or final_df), capture it.
+    # viz_df → Visual Analyst's temp scoped variable (never persisted to session).
+    # final_df → Cleaning Agent's persistent variable (persisted to session).
     if result.dataframe is not None:
         # Infer which agent produced this: if the code contains 'viz_df', treat as temp.
-        # Otherwise default to cleaned_df (Cleaning Agent behaviour).
+        # Otherwise store as final_df (Cleaning Agent behaviour).
         if "viz_df" in code:
             _local.viz_temp_df = result.dataframe
         else:
-            _local.cleaned_df = result.dataframe
+            _local.final_df = result.dataframe
         
     output = result.output if result.output else "Code executed successfully."
     return output
