@@ -112,6 +112,18 @@ print(f"Filtered: {len(final_df)} rows")
         assert result.dataframe is not None
         assert len(result.dataframe) == 2  # Bob (30) and Charlie (35)
 
+    def test_display_df_creation(self, sample_df):
+        code = """
+display_df = df.pivot_table(index='city', values='score', aggfunc='mean')
+print("Pivot table created")
+"""
+        result = safe_execute(code, sample_df)
+        assert not result.blocked
+        assert result.error is None
+        assert result.display_df is not None
+        assert isinstance(result.display_df, pd.DataFrame)
+        assert "London" in result.display_df.index
+
     def test_print_output(self, sample_df):
         code = 'print("Hello from sandbox!")'
         result = safe_execute(code, sample_df)
