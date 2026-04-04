@@ -238,9 +238,13 @@ def _run_agent_and_save(llm_prompt: str, user_display_text: str | None = None):
     response_text = asyncio.run(generate_response())
     response_without_code = extract_non_code_text(response_text)
 
-    # Retrieve generated figures from the session context
+    # Retrieve generated figures and original data summary from the session context
     figures = get_session_figures()
     figure = figures[-1] if figures else None
+    
+    # Grounding context (actual data metrics) for the Vision agent
+    from dataverse_agent.tools import get_session_data_summary
+    data_grounding_summary = get_session_data_summary()
 
     # Check if the cleaning agent produced a transformed DataFrame
     cleaned_df = get_cleaned_df()
@@ -271,8 +275,11 @@ def _run_agent_and_save(llm_prompt: str, user_display_text: str | None = None):
 
         with st.spinner("Analyzing chart insights..."):
             insight_prompt = (
-                "You are looking at the chart you just generated. Provide a focused data insight using this strict two-part framework:\n\n"
-                "**📊 Observation (What do I see?):** What specific, factual patterns, trends, outliers, or distributions exist in the chart? Be precise — cite numbers, percentages, or rankings where possible.\n\n"
+                "You are looking at a chart generated from the following dataset summary:\n\n"
+                f"### [Reference Data Grounding]\n{data_grounding_summary}\n\n"
+                "---\n\n"
+                "Provide a focused data insight using this strict two-part framework:\n\n"
+                "**📊 Observation (What do I see?):** What specific, factual patterns, trends, outliers, or distributions exist in the chart? Be precise — use the **Reference Data Grounding** above to cite exact numbers, percentages, or rankings where possible.\n\n"
                 "**💡 Interpretation (Why does it matter?):** What is the core business or practical implication of this pattern? "
                 "Consider: Is there a concentration risk? A growth opportunity? An anomaly that needs investigation?\n\n"
                 "Keep it concise (2-4 sentences total). Be highly specific and avoid generic statements.\n\n"
