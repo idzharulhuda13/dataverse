@@ -376,7 +376,7 @@ class StressTestRunner:
             print(f"   ✨ Enriching query...")
             from dataverse_agent.agents.enricher import enrich_query
             try:
-                enriched_question = enrich_query(question.question, self.working_df)
+                enriched_question, _usage = enrich_query(question.question, self.working_df)
                 result.enriched_question = enriched_question
                 print(f"      Enriched: {enriched_question}")
             except Exception as e:
