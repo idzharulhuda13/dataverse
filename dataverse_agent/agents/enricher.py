@@ -28,7 +28,7 @@ def _get_client() -> genai.Client:
     return _client
 
 
-def enrich_query(user_text: str, df: pd.DataFrame) -> str:
+def enrich_query(user_text: str, df: pd.DataFrame) -> tuple[str, dict]:
     """Rewrite a vague user query into a specific analytical prompt.
 
     Args:
@@ -36,7 +36,7 @@ def enrich_query(user_text: str, df: pd.DataFrame) -> str:
         df: The current DataFrame for schema context.
 
     Returns:
-        The enriched, actionable query string.
+        A tuple of (enriched_query_string, usage_metadata_dict).
     """
     # Build compact dataset context
     buf = io.StringIO()
@@ -56,4 +56,12 @@ def enrich_query(user_text: str, df: pd.DataFrame) -> str:
             temperature=0.0,
         ),
     )
-    return response.text.strip()
+    
+    # Extract usage metadata for token tracking
+    usage = {
+        "prompt_token_count": response.usage_metadata.prompt_token_count,
+        "candidates_token_count": response.usage_metadata.candidates_token_count,
+        "total_token_count": response.usage_metadata.total_token_count,
+    }
+    
+    return response.text.strip(), usage
