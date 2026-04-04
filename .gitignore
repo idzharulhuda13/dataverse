@@ -1,6 +1,5 @@
 # Python
 __pycache__/
-__pycache__/
 *.py[cod]
 *$py.class
 *.so
@@ -67,7 +66,5 @@ secrets.toml
 
 # Stress test results
 tests/stress_results/
-tests/stress_results/charts/
 
-# Agents Skills
-.agents/skills
+.agents/

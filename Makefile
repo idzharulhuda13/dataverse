@@ -38,7 +38,7 @@ tunnel:
 
 all:
 	@echo "Starting Streamlit application and ngrok tunnel..."
-	@streamlit run streamlit_chatbot_api.py &
+	@streamlit run streamlit_agent_dashboard.py &
 	@ngrok http --domain snail-tough-cowbird.ngrok-free.app 8501
 
 stop:
