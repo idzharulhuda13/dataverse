@@ -17,14 +17,14 @@ WAREHOUSE_PATH = _PROJECT_ROOT / "dbt" / "dataverse" / "dataverse_warehouse.duck
 # Manually maintained for now. Future: auto-scan from dbt manifest.json
 TABLE_REGISTRY: dict[str, dict] = {
     "mrt_sales": {
-        "display_name": "Chocolate Sales — Full Transactions",
-        "description": "1M order-level transactions with all customer, product, store, and time dimensions pre-joined.",
+        "display_name": "Chocolate Sales — Latest 6 Months",
+        "description": "Transactional data filtered at the source model (dbt) to only include the last 6 months of data (~250k rows).",
         "schema": "main_chocolate_sales_mrt",
         "icon": "🛒",
         "grain": "One row per order",
-        "approx_rows": "1,000,000",
+        "approx_rows": "250,000",
         "columns": 44,
-        "tags": ["sales", "transactions", "OBT"],
+        "tags": ["sales", "transactions", "OBT", "filtered"],
     },
     "mrt_customer_summary": {
         "display_name": "Customer Summary",

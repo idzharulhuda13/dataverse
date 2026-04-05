@@ -8,6 +8,7 @@
 
 with sales as (
     select * from {{ ref('src_sales') }}
+    where order_date >= (select max(order_date) from {{ ref('src_sales') }}) - interval 6 month
 ),
 
 customers as (
