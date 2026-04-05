@@ -43,13 +43,17 @@ def get_session_data_summary() -> str:
             summary.append("Numeric Summary:")
             summary.append(num_df.agg(['sum', 'mean', 'max', 'min']).to_string())
         
-        # For categorical columns, provide top 5 values
+        # For categorical columns, provide top 5 values (or full list if low cardinality)
         cat_df = df.select_dtypes(exclude='number')
         if not cat_df.empty:
             summary.append("Category Samples:")
             for col in cat_df.columns[:3]: # limit to first 3 cats
-                top_v = df[col].value_counts().head(5).to_string()
-                summary.append(f"- {col}:\n{top_v}")
+                uniques = df[col].dropna().unique()
+                if len(uniques) <= 20:
+                    summary.append(f"- {col} (All {len(uniques)} unique values):\n{uniques.tolist()}")
+                else:
+                    top_v = df[col].value_counts().head(5).to_string()
+                    summary.append(f"- {col} (Top 5 of {len(uniques)} unique values):\n{top_v}")
     
     # No side-effects here to allow multiple calls if needed
     return "\n".join(summary)
@@ -163,7 +167,8 @@ def _human_format(val, pos=None):
         return f"{sign}{formatted.rstrip('0').rstrip('.')}K"
     elif abs_val == 0:
         return "0"
-    elif abs_val < 1:
+    elif abs_val < 100:
+        # Use significant digits for small indices/ratios to preserve decimals like 1.05
         return f"{val:.3g}"
     else:
         return f"{sign}{abs_val:.0f}"
@@ -172,13 +177,14 @@ def _percent_format(val, pos=None):
     """Format decimal values (0.0 to 1.0) as percentages (0% to 100%)."""
     return f"{val * 100:.1f}%".replace(".0%", "%")
 
-def create_visualization(chart_type: str, x_column: str, y_column: str = None, hue: str = None, estimator: str = "mean", title: str = None, subtitle: str = None, sort_order: str = "ascending") -> str:
+def create_visualization(chart_type: str, x_column: str, y_column: str = None, y2_column: str = None, hue: str = None, estimator: str = "mean", title: str = None, subtitle: str = None, sort_order: str = "ascending") -> str:
     """Create a Seaborn or Matplotlib visualization from the dataset.
     
     Args:
         chart_type: The type of chart ('bar', 'line', 'scatter', 'hist', 'box', 'violin', 'heatmap', 'pie', 'stacked_area', 'slope').
         x_column: The name of the column for the X-axis.
         y_column: The name of the column for the Y-axis (optional for some charts).
+        y2_column: The name of the column for the secondary Y-axis (optional, used for dual-axis line charts).
         hue: The name of the column to group by color (optional).
         estimator: Statistical function to use for aggregation ('mean', 'sum', 'count', 'min', 'max'). Defaults to 'mean'.
         title: The title of the chart (e.g. "Revenue by Region").
@@ -225,6 +231,7 @@ def create_visualization(chart_type: str, x_column: str, y_column: str = None, h
         # Prevent Seaborn warning: "Passing palette without assigning hue is deprecated"
         use_legend = True if hue else False
         plot_hue = hue
+        ax2 = None
         
         if chart_type in ('bar', 'box', 'violin'):
             is_horizontal = (
@@ -302,6 +309,15 @@ def create_visualization(chart_type: str, x_column: str, y_column: str = None, h
             else:
                 # Use scalar color to avoid palette without hue warnings
                 sns.lineplot(data=df, x=x_column, y=y_column, color=HIGHLIGHT, ax=ax, linewidth=2.5, marker="o", markersize=6, estimator=estimator, errorbar=error_config)
+            
+            if y2_column:
+                ax.set_ylabel(_format_label(y_column), fontweight="bold", labelpad=10, color=HIGHLIGHT)
+                ax.tick_params(axis='y', colors=HIGHLIGHT)
+                ax2 = ax.twinx()
+                sns.lineplot(data=df, x=x_column, y=y2_column, color=ACCENT, ax=ax2, linewidth=2.5, marker="^", markersize=6, estimator=estimator, errorbar=None)
+                ax2.set_ylabel(_format_label(y2_column), fontweight="bold", labelpad=10, color=ACCENT)
+                ax2.tick_params(axis='y', colors=ACCENT)
+                ax2.yaxis.grid(False)
         elif chart_type == 'scatter':
             sns.scatterplot(data=df, x=x_column, y=y_column, hue=plot_hue, palette=palette, ax=ax, s=70, alpha=0.8, edgecolor="white", linewidth=0.5, legend=use_legend)
         elif chart_type == 'hist':
@@ -452,6 +468,18 @@ def create_visualization(chart_type: str, x_column: str, y_column: str = None, h
             else:
                 # E.g. histograms where y-axis is the count/density
                 ax.yaxis.set_major_formatter(mticker.FuncFormatter(_human_format))
+                
+            if ax2 is not None and y2_column:
+                if pd.api.types.is_numeric_dtype(df[y2_column]):
+                    if _is_year_column(y2_column):
+                        ax2.yaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: f"{int(v)}"))
+                    elif _is_month_column(y2_column):
+                        ax2.yaxis.set_major_formatter(mticker.FuncFormatter(_month_name))
+                    elif _is_percent_column(y2_column):
+                        ax2.yaxis.set_major_formatter(mticker.FuncFormatter(_percent_format))
+                    else:
+                        ax2.yaxis.set_major_formatter(mticker.FuncFormatter(_human_format))
+                        
             # Auto-rotate x labels if they are long or numerous
             ticks = ax.get_xticklabels()
             max_label_len = max([len(t.get_text()) for t in ticks]) if ticks else 0
