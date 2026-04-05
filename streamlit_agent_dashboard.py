@@ -783,6 +783,7 @@ else:
                     if st.session_state.dashboard_items:
                         if not st.session_state.get("infographic_pdf"):
                             with st.spinner("🎨 Agent is creating your infographic..."):
+                                st.toast("🎨 Starting infographic generation...", icon="🎨")
                                 from dataverse_agent.tools import get_session_data_summary
                                 set_session_context(st.session_state.modified_df)
                                 current_sid = st.session_state.current_session_id
@@ -793,6 +794,7 @@ else:
                                         dashboard_items=st.session_state.dashboard_items,
                                         data_summary=get_session_data_summary(),
                                         dataset_name=st.session_state.sessions[current_sid]["name"],
+                                        df=st.session_state.modified_df,
                                         usage_tracker=st.session_state.usage,
                                     ))
                                     pdf_bytes = render_infographic_pdf(
@@ -801,8 +803,13 @@ else:
                                         dataset_name=st.session_state.sessions[current_sid]["name"],
                                     )
                                     st.session_state.infographic_pdf = pdf_bytes
+                                    st.toast("✅ Infographic ready for download!", icon="✨")
+                                    # Clear old errors on success
+                                    if "infographic_error" in st.session_state:
+                                        st.session_state.infographic_error = None
+                                    st.rerun()
                                 except Exception as e:
-                                    st.error(f"⚠️ Infographic generation failed: {e}")
+                                    st.session_state.infographic_error = str(e)
                         if st.session_state.get("infographic_pdf"):
                             st.download_button(
                                 label="📥 Download Infographic PDF",
@@ -811,6 +818,12 @@ else:
                                 mime="application/pdf",
                                 key=f"dl_infographic_{idx}",
                             )
+                        
+                        if st.session_state.get("infographic_error"):
+                            st.warning(f"⚠️ Previous generation failed: {st.session_state.infographic_error}")
+                            if st.button("🔄 Clear Error", key=f"clear_inf_error_{idx}"):
+                                st.session_state.infographic_error = None
+                                st.rerun()
 
         # ── Chat Input Box ────────────────────────────────────────────────
         if prompt := st.chat_input("Ask for a visualization (attach a data file)...", accept_file="multiple"):
@@ -949,6 +962,7 @@ else:
             with infographic_col1:
                 if st.button("📄 Generate Infographic", key="gen_infographic",
                              use_container_width=True, type="secondary"):
+                    st.toast("📡 Contacting agent for summary...", icon="🤖")
                     with st.spinner("🎨 Agent is summarizing your dashboard..."):
                         from dataverse_agent.tools import get_session_data_summary
                         set_session_context(st.session_state.modified_df)
@@ -960,6 +974,7 @@ else:
                                 dashboard_items=st.session_state.dashboard_items,
                                 data_summary=get_session_data_summary(),
                                 dataset_name=st.session_state.sessions[current_sid]["name"],
+                                df=st.session_state.modified_df,
                                 usage_tracker=st.session_state.usage,
                             ))
                             pdf_bytes = render_infographic_pdf(
@@ -968,9 +983,12 @@ else:
                                 dataset_name=st.session_state.sessions[current_sid]["name"],
                             )
                             st.session_state.infographic_pdf = pdf_bytes
+                            st.toast("✨ Infographic generated successfully!", icon="✅")
+                            # Remove any old error
+                            st.session_state.infographic_error = None
+                            st.rerun()
                         except Exception as e:
-                            st.error(f"⚠️ Failed to generate infographic: {e}")
-                    st.rerun()
+                            st.session_state.infographic_error = str(e)
 
             with infographic_col2:
                 if st.session_state.get("infographic_pdf"):
@@ -983,6 +1001,12 @@ else:
                         use_container_width=True,
                         type="primary",
                     )
+            
+            if st.session_state.get("infographic_error"):
+                st.error(f"⚠️ Generation failed: {st.session_state.infographic_error}")
+                if st.button("🗑️ Clear Error", key="clear_inf_error_dash"):
+                    st.session_state.infographic_error = None
+                    st.rerun()
 
         st.divider()
 

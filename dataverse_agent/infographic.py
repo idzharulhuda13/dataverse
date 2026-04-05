@@ -18,6 +18,7 @@ import textwrap
 from datetime import datetime
 from typing import Optional
 
+import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 
@@ -82,13 +83,21 @@ Return ONLY valid JSON (no markdown fencing, no extra text) with this exact sche
     "Second key insight (1 sentence)",
     "Third key insight (1 sentence)"
   ],
-  "conclusion": "A 1-2 sentence executive summary tying all findings together."
+  "conclusion": "A 1-2 sentence executive summary tying all findings together.",
+  "metrics": [
+     {{"label": "Metric title with unit if known (e.g. Total Revenue ($))", "column": "column_name", "op": "sum|mean|count|nunique"}}
+  ]
 }}
 
 RULES:
+- metrics should have 2-6 entries (relevant KPIs with different operations).
+- metrics[].op MUST be one of: sum, mean, count, nunique, max, min.
+- metrics[].column MUST be a valid column from the Data Summary.
 - chart_headlines MUST have exactly {chart_count} entries (one per chart, in order).
 - key_takeaways should have 3-5 entries.
 - Be specific: use actual numbers, percentages, and category names from the data.
+- MUST include units in metric labels (e.g., "($)", "(kg)", "(%)") if evident from column names or summary.
+- Prefer "sum" (Total) for high-level business metrics like Revenue, Sales, and Volume.
 - Do NOT use generic filler text. Every sentence must reference concrete data.
 - Return ONLY the JSON object, nothing else.
 """
@@ -100,6 +109,7 @@ async def generate_infographic_content(
     dashboard_items: list[dict],
     data_summary: str,
     dataset_name: str,
+    df: pd.DataFrame,
     usage_tracker=None,
 ) -> dict:
     """Send all pinned charts to Gemini and get structured infographic content."""
@@ -148,7 +158,63 @@ async def generate_infographic_content(
                 if p.text:
                     response_text += p.text
 
-    return _parse_agent_response(response_text, len(dashboard_items))
+    agent_json = _parse_agent_response(response_text, len(dashboard_items))
+    
+    # Deterministically calculate metric values from the actual dataframe
+    metrics_list = agent_json.get("metrics")
+    if not isinstance(metrics_list, list):
+        metrics_list = []
+        
+    agent_json["calculated_metrics"] = _calculate_metric_values(df, metrics_list)
+    
+    return agent_json
+
+
+def _calculate_metric_values(df: pd.DataFrame, metrics: list[dict]) -> list[dict]:
+    """Calculate deterministic values for the agent-suggested metrics."""
+    results = []
+    for m in metrics:
+        if not isinstance(m, dict):
+            continue
+        label = m.get("label", "Metric")
+        col = m.get("column")
+        op = m.get("op", "count")
+        
+        value = None
+        if not col or col not in df.columns:
+            # Fallback to row count if column is missing or invalid
+            value = len(df)
+            label = "Total Records"
+        else:
+            try:
+                if op == "sum":
+                    value = df[col].sum()
+                elif op == "mean":
+                    value = df[col].mean()
+                elif op == "nunique":
+                    value = df[col].nunique()
+                elif op == "max":
+                    value = df[col].max()
+                elif op == "min":
+                    value = df[col].min()
+                else: # count
+                    value = df[col].count()
+            except Exception:
+                value = len(df)
+                label = "Total Records"
+        
+        # Special handling for percentages: if column name has 'growth', 'rate', or '%'
+        if value is not None and any(x in str(col).lower() for x in ['%', 'growth', 'rate']):
+            if isinstance(value, (int, float)):
+                label = label if "%" in label else f"{label} (%)"
+
+        results.append({
+            "label": label,
+            "value": value,
+            "op": op
+        })
+    
+    return results
 
 
 def _parse_agent_response(raw_text: str, chart_count: int) -> dict:
@@ -176,8 +242,13 @@ def _parse_agent_response(raw_text: str, chart_count: int) -> dict:
         content["chart_headlines"] = [f"Chart {i + 1}" for i in range(chart_count)]
     if "key_takeaways" not in content or not content["key_takeaways"]:
         content["key_takeaways"] = ["Analysis reveals notable patterns in the data."]
-    if "conclusion" not in content:
+    if "conclusion" in content:
+        content["conclusion"] = content["conclusion"]
+    else:
         content["conclusion"] = "Further analysis recommended to uncover deeper trends."
+        
+    if "metrics" not in content or not isinstance(content["metrics"], list):
+        content["metrics"] = []
 
     return content
 
@@ -258,32 +329,20 @@ def render_infographic_pdf(
     dashboard_items: list[dict],
     dataset_name: str,
 ) -> bytes:
-    """Compose a full-page infographic PDF from agent content + pinned charts using flowables."""
+    """Compose a single-page scrolling infographic PDF (dynamic height)."""
+    from dataverse_agent.tools import _human_format
+    
+    # ── 1. Setup Base Layout ───
+    A4_WIDTH = A4[0]
+    LEFT_MARGIN = 36
+    RIGHT_MARGIN = 36
+    CONTENT_WIDTH = A4_WIDTH - LEFT_MARGIN - RIGHT_MARGIN
+    
+    # Header/Footer Fixed Heights
+    HEADER_H = 90
+    FOOTER_H = 25
+    
     pdf_buffer = io.BytesIO()
-    
-    # Margins: Ensure flowables don't paint over the 75pt header and 24pt footer
-    doc = BaseDocTemplate(
-        pdf_buffer, 
-        pagesize=A4,
-        leftMargin=MARGIN, rightMargin=MARGIN,
-        topMargin=85, bottomMargin=40,
-        title=content.get("infographic_title", "DataVerse Infographic")
-    )
-    
-    # We use a single Frame that occupies the area between header and footer
-    frame = Frame(
-        doc.leftMargin, doc.bottomMargin, 
-        doc.width, doc.height, 
-        id='normal'
-    )
-    # create a template with our background/header callback
-    template = PageTemplate(
-        id='test', 
-        frames=frame, 
-        onPage=lambda c, d: _header_footer_template(c, d, content)
-    )
-    doc.addPageTemplates([template])
-
     styles = getSampleStyleSheet()
     
     # Custom styles
@@ -322,9 +381,103 @@ def render_infographic_pdf(
         leading=11,
         spaceBefore=10,
     )
+    metric_value_style = ParagraphStyle(
+        name='MetricValue',
+        fontName='Helvetica-Bold',
+        fontSize=15,
+        textColor=NAVY,
+        alignment=TA_CENTER,
+    )
+    metric_label_style = ParagraphStyle(
+        name='MetricLabel',
+        fontName='Helvetica',
+        fontSize=7.5,
+        textColor=CAPTION_COLOR,
+        alignment=TA_CENTER,
+        leading=9,
+    )
 
     story = []
-    story.append(Spacer(1, 10))
+    story.append(Spacer(1, 8))
+
+    # --- Metrics Bar (KPI Cards) ---
+    metrics = content.get("calculated_metrics", [])
+    if metrics:
+        metric_cards = []
+        count = len(metrics)
+        # Determine columns (max 4 per row for visual balance)
+        cols = min(count, 4)
+        # Padding between cards
+        gap = 6
+        # Responsive card width based on number of columns
+        card_w = (CONTENT_WIDTH - (gap * (cols - 1))) / cols
+        
+        table_rows = []
+        current_row = []
+        
+        for i, m in enumerate(metrics):
+            if not isinstance(m, dict):
+                continue
+            
+            try:
+                val = m.get("value")
+                # Handle None or non-numeric values for _human_format
+                if val is None:
+                    val_text = "N/A"
+                else:
+                    try:
+                        val_text = _human_format(val)
+                    except Exception:
+                        val_text = str(val)
+                
+                label_text = str(m.get("label", "METRIC")).upper()
+                
+                # Variety in colors
+                border_colors = [TEAL, GOLD, NAVY, LIGHT_TEAL, GOLD, TEAL]
+                b_color = border_colors[i % len(border_colors)]
+                
+                card_content = [
+                    [Paragraph(label_text, metric_label_style)],
+                    [Paragraph(val_text, metric_value_style)]
+                ]
+                
+                card_table = Table(card_content, colWidths=[card_w], style=[
+                    ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                    ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                    ('BACKGROUND', (0,0), (-1,-1), CARD_BG),
+                    ('LINEABOVE', (0,0), (-1,0), 2, b_color),
+                    ('BOX', (0,0), (-1,-1), 0.5, GRID_COLOR),
+                    ('TOPPADDING', (0,0), (-1,-1), 4),
+                    ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+                ])
+                
+                current_row.append(card_table)
+            except Exception:
+                # Skip this specific card if it fails for any reason
+                continue
+            
+            # Wrap to next row if we exceed max columns
+            if len(current_row) == cols:
+                table_rows.append(current_row)
+                current_row = []
+        
+        # Handle trailing metrics if any
+        if current_row:
+            # Fill with empty cells for layout stability
+            while len(current_row) < cols:
+                current_row.append("")
+            table_rows.append(current_row)
+        
+        # Final row spacing
+        metrics_grid = Table(table_rows, colWidths=[card_w + (gap if i < cols-1 else 0) for i in range(cols)], style=[
+            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+            ('VALIGN', (0,0), (-1,-1), 'TOP'),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 10),
+            ('LEFTPADDING', (0,0), (-1,-1), 0),
+            ('RIGHTPADDING', (0,0), (-1,-1), 0),
+        ])
+        story.append(metrics_grid)
+        story.append(Spacer(1, 10))
 
     # --- Charts Grid (Responsive Table) ---
     chart_figures = _prepare_chart_images(dashboard_items)
@@ -333,7 +486,7 @@ def render_infographic_pdf(
     if chart_figures:
         # Determine cols based on chart count (max 2)
         cols = 2 if len(chart_figures) > 1 else 1
-        col_width = (doc.width - 15) / cols if cols > 1 else doc.width
+        col_width = (CONTENT_WIDTH - 15) / cols if cols > 1 else CONTENT_WIDTH
         
         # Build grid data: [[cell1, cell2], [cell3...]]
         table_data = []
@@ -416,7 +569,7 @@ def render_infographic_pdf(
             box_story.append(Paragraph(f"{conclusion}", conclusion_style))
             
         # Wrap everything in a Background Table to act as the Navy Box
-        takeaway_card = Table([[box_story]], colWidths=[doc.width], style=[
+        takeaway_card = Table([[box_story]], colWidths=[CONTENT_WIDTH], style=[
             ('BACKGROUND', (0,0), (-1,-1), NAVY),
             ('BOX', (0,0), (-1,-1), 0, NAVY), # Border
             ('TOPPADDING', (0,0), (-1,-1), 15),
@@ -425,8 +578,70 @@ def render_infographic_pdf(
             ('RIGHTPADDING', (0,0), (-1,-1), 20),
         ])
         
-        story.append(KeepTogether(takeaway_card))
+        story.append(takeaway_card)
 
+    # ── 3. Calculate Dynamic Height ───
+    current_h = 0
+    for flowable in story:
+        w, h = flowable.wrap(CONTENT_WIDTH, 1000000)
+        current_h += h
+        # Add a tiny buffer for spacers/padding between elements
+        if isinstance(flowable, Spacer):
+            current_h += 2 
+
+    final_height = max(current_h + HEADER_H + FOOTER_H + 60, A4[1])
+    
+    # Pre-define header styles for canvas drawing
+    header_title_style = ParagraphStyle(
+        name='HeaderTitle', fontName='Helvetica-Bold', fontSize=18, textColor=HexColor("#FFFFFF"),
+        alignment=TA_CENTER, leading=22,
+    )
+    header_subtitle_style = ParagraphStyle(
+        name='HeaderSubtitle', fontName='Helvetica', fontSize=9, textColor=HexColor("#FFFFFF"),
+        alignment=TA_CENTER, leading=11,
+    )
+
+    # ── 4. Build Custom Document ───
+    doc = BaseDocTemplate(
+        pdf_buffer,
+        pagesize=(A4_WIDTH, final_height),
+        leftMargin=LEFT_MARGIN,
+        rightMargin=RIGHT_MARGIN,
+        topMargin=HEADER_H + 10,
+        bottomMargin=FOOTER_H + 10,
+        title=content.get("infographic_title", "DataVerse Infographic")
+    )
+
+    def draw_fixed_elements(canvas, doc):
+        canvas.saveState()
+        # Header (Top)
+        canvas.setFillColor(NAVY)
+        canvas.rect(0, final_height - HEADER_H, A4_WIDTH, HEADER_H, fill=1)
+        
+        # Title with wrapping
+        title_text = content.get("infographic_title", "DATA ANALYSIS OVERVIEW").upper()
+        p_title = Paragraph(title_text, header_title_style)
+        w, h = p_title.wrap(CONTENT_WIDTH, HEADER_H)
+        p_title.drawOn(canvas, LEFT_MARGIN, final_height - 15 - h)
+        
+        # Subtitle with wrapping (positioned relative to title)
+        subtitle_text = content.get("infographic_subtitle", f"Automated Insights for {dataset_name}").upper()
+        p_sub = Paragraph(subtitle_text, header_subtitle_style)
+        w_s, h_s = p_sub.wrap(CONTENT_WIDTH, HEADER_H)
+        p_sub.drawOn(canvas, LEFT_MARGIN, final_height - 15 - h - 5 - h_s)
+        
+        # Footer (Bottom)
+        canvas.setFillColor(NAVY)
+        canvas.rect(0, 0, A4_WIDTH, FOOTER_H, fill=1)
+        canvas.setFillColor(HexColor("#FFFFFF"))
+        canvas.setFont('Helvetica-Oblique', 8)
+        canvas.drawString(LEFT_MARGIN, 9, f"GENERATED BY DATAVERSE AI • {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+        canvas.restoreState()
+
+    frame = Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height, id='normal')
+    template = PageTemplate(id='ScrollingPage', frames=frame, onPage=draw_fixed_elements)
+    doc.addPageTemplates([template])
+    
     doc.build(story)
     
     return pdf_buffer.getvalue()
