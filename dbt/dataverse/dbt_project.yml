@@ -1,0 +1,26 @@
+name: 'dataverse'
+version: '1.0.0'
+config-version: 2
+
+profile: 'dataverse'
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+
+target-path: "target"
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+models:
+  dataverse:
+    chocolate_sales:
+      src:
+        +materialized: ephemeral
+      dim:
+        +materialized: ephemeral
+      mrt:
+        +materialized: view
+        +schema: chocolate_sales_mrt

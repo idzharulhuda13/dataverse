@@ -1,0 +1,70 @@
+version: 2
+
+sources:
+  - name: raw
+    description: "Raw Chocolate Sales parquet files loaded via DuckDB external scans"
+    tables:
+      - name: sales
+        description: "1M order-level sales transactions (2023-2024)"
+        external:
+          location: "{{ env_var('DBT_DATA_PATH', '../../data/Chocolate Sales') }}/sales.parquet"
+        columns:
+          - name: order_id
+            description: "Unique order identifier"
+          - name: order_date
+            description: "Date the order was placed (YYYY-MM-DD)"
+          - name: product_id
+          - name: store_id
+          - name: customer_id
+          - name: quantity
+          - name: unit_price
+          - name: discount
+          - name: revenue
+          - name: cost
+          - name: profit
+
+      - name: customers
+        description: "50K customer profiles"
+        external:
+          location: "{{ env_var('DBT_DATA_PATH', '../../data/Chocolate Sales') }}/customers.parquet"
+        columns:
+          - name: customer_id
+          - name: age
+          - name: gender
+          - name: loyalty_member
+          - name: join_date
+
+      - name: products
+        description: "200 product SKUs"
+        external:
+          location: "{{ env_var('DBT_DATA_PATH', '../../data/Chocolate Sales') }}/products.parquet"
+        columns:
+          - name: product_id
+          - name: product_name
+          - name: brand
+          - name: category
+          - name: cocoa_percent
+          - name: weight_g
+
+      - name: stores
+        description: "100 store locations"
+        external:
+          location: "{{ env_var('DBT_DATA_PATH', '../../data/Chocolate Sales') }}/stores.parquet"
+        columns:
+          - name: store_id
+          - name: store_name
+          - name: city
+          - name: country
+          - name: store_type
+
+      - name: calendar
+        description: "731-row date spine covering 2023-2024"
+        external:
+          location: "{{ env_var('DBT_DATA_PATH', '../../data/Chocolate Sales') }}/calendar.parquet"
+        columns:
+          - name: date
+          - name: year
+          - name: month
+          - name: day
+          - name: week
+          - name: day_of_week

@@ -1,0 +1,56 @@
+version: 2
+
+models:
+  - name: dim_customers
+    description: "Enriched customer dimension with derived age and tenure segments"
+    columns:
+      - name: customer_id
+        description: "Primary key — unique customer identifier"
+        tests:
+          - not_null
+          - unique
+      - name: age_band
+        description: "Age group bucket: 18–24, 25–34, 35–44, 45–54, 55+"
+      - name: loyalty_member
+        description: "True if customer is enrolled in the loyalty programme"
+      - name: tenure_band
+        description: "How long the customer has been active: < 1 Year, 1–2 Years, 2+ Years"
+
+  - name: dim_products
+    description: "Product catalog with derived cocoa intensity and weight tier"
+    columns:
+      - name: product_id
+        description: "Primary key — unique product SKU"
+        tests:
+          - not_null
+          - unique
+      - name: cocoa_tier
+        description: "Cocoa intensity bucket: Milk / White, Semi-Dark, Dark, Extra Dark"
+      - name: weight_tier
+        description: "Package size: Small (< 100g), Medium (100–149g), Large (150g+)"
+
+  - name: dim_stores
+    description: "Store directory enriched with high-level region grouping"
+    columns:
+      - name: store_id
+        description: "Primary key — unique store identifier"
+        tests:
+          - not_null
+          - unique
+      - name: region
+        description: "Geographic region derived from country (e.g. North America, Europe, Asia)"
+
+  - name: dim_date
+    description: "Full date dimension covering 2023-2024 with human-readable labels"
+    columns:
+      - name: date
+        description: "Primary key — calendar date"
+        tests:
+          - not_null
+          - unique
+      - name: quarter
+        description: "Fiscal quarter label: Q1, Q2, Q3, Q4"
+      - name: is_weekend
+        description: "True if the date falls on Saturday or Sunday"
+      - name: year_month
+        description: "Formatted YYYY-MM label for time-series charting"

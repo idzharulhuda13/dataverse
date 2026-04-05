@@ -1,0 +1,7 @@
+dataverse:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: "dataverse_warehouse.duckdb"
+      threads: 4
