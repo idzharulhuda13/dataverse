@@ -28,13 +28,14 @@ def _get_client() -> genai.Client:
     return _client
 
 
-def enrich_query(user_text: str, df: pd.DataFrame, chat_history: list[dict] = None) -> tuple[str, dict]:
+def enrich_query(user_text: str, df: pd.DataFrame, chat_history: list[dict] = None, dataset_name: str = None) -> tuple[str, dict]:
     """Rewrite a vague user query into a specific analytical prompt.
 
     Args:
         user_text: The raw user query.
         df: The current DataFrame for schema context.
         chat_history: Optional list of recent messages for context.
+        dataset_name: Optional human-readable dataset name (used in enterprise mode).
 
     Returns:
         A tuple of (enriched_query_string, usage_metadata_dict).
@@ -55,9 +56,11 @@ def enrich_query(user_text: str, df: pd.DataFrame, chat_history: list[dict] = No
     df.info(buf=buf)
     df_context = f"Columns & types:\n{buf.getvalue()}\n\nSample (first 5 rows):\n{df.head(5).to_string()}"
 
+    dataset_label = f"Dataset name: {dataset_name}\n" if dataset_name else ""
     user_prompt = (
         f"{history_context}"
         f"Raw user query: {user_text}\n\n"
+        f"{dataset_label}"
         f"Dataset:\n{df_context}"
     )
 

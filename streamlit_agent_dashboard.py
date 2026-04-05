@@ -12,6 +12,7 @@ from google import genai
 from google.genai import types
 
 from models.utils import load_dataframe, get_excel_sheet_names, extract_non_code_text, SUPPORTED_EXTENSIONS
+from models.duckdb_connector import list_tables, load_table
 from dataverse_agent.agent import root_agent
 from dataverse_agent.agents.enricher import enrich_query
 from dataverse_agent.tools import set_session_context, get_session_figures, get_final_df, get_display_df
@@ -27,10 +28,6 @@ from google.adk.runners import Runner
 from google.adk.sessions.in_memory_session_service import InMemorySessionService
 
 st.set_page_config(page_title="DataVerse - Dashboard Generation", layout="wide")
-
-
-# HELPER FUNCTIONS INLINED
-
 
 # ── SESSION MANAGEMENT HELPERS ───────────────────────────────────────────────
 
@@ -163,7 +160,10 @@ for key, default in [
     ("show_observability", False),
     ("show_usage_budget", False),
     ("max_budget_turns", 50),
-    ("is_logged_in", False)
+    ("is_logged_in", False),
+    ("enterprise_mode", False),   # seeded from file-level constant
+    ("enterprise_table_id", None),
+    ("enterprise_dataset_name", None),
 ]:
     if key not in st.session_state:
         st.session_state[key] = default
@@ -198,6 +198,7 @@ with st.sidebar:
                 st.rerun()
 
     st.divider()
+
     st.markdown("## 🗂️ Sessions")
 
     # ── New Session Button ────────────────────────────────────────────────
@@ -387,6 +388,22 @@ with st.sidebar:
         st.session_state.show_observability = False
         st.session_state.show_usage_budget = False
 
+    # Enterprise Mode — available to everyone (no login required)
+    st.session_state.enterprise_mode = st.toggle(
+        "🏢 Enterprise Mode",
+        value=st.session_state.get("enterprise_mode", False),
+        help="Replace file upload with the DataVerse warehouse table picker."
+    )
+    
+    st.divider()
+
+    # ── Enterprise Mode: Switch Table ─────────────────────────────────────
+    if st.session_state.enterprise_mode and st.session_state.get("modified_df") is not None:
+        if st.button("🔄 Switch Table", use_container_width=True, help="Return to the table picker"):
+            st.session_state.modified_df = None
+            st.session_state.enterprise_table_id = None
+            st.session_state.enterprise_dataset_name = None
+            st.rerun()
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # 3. HELPER — Run agent and handle response (reused by upload + chat)
@@ -592,8 +609,106 @@ def _run_agent_and_save(llm_prompt: str, user_display_text: str | None = None):
 
 st.title("DataVerse - Agent Dashboard Generation")
 
-# ── BRANCH: No data loaded yet → Upload-First Landing ─────────────────────
+# ── BRANCH A: Enterprise Mode — Warehouse Table Picker ───────────────────
+if st.session_state.enterprise_mode and st.session_state.modified_df is None:
+    st.markdown("")
+    _left_spacer, center_col, _right_spacer = st.columns([1, 2, 1])
+
+    with center_col:
+        st.markdown(
+            "<div style='text-align:center; padding: 1.5rem 0 0.5rem;'>"
+            "<span style='font-size:3.5rem;'>🏢</span>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            "<h2 style='text-align:center; margin-bottom:0.25rem;'>Choose Your Dataset</h2>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            "<p style='text-align:center; color:#64748B; font-size:1.05rem; margin-bottom:1.5rem;'>"
+            "Select a pre-built data mart from the DataVerse warehouse to begin analysis.</p>",
+            unsafe_allow_html=True,
+        )
+
+        _tables = list_tables()
+        _current_sid = st.session_state.current_session_id
+
+        # ── Featured card: mrt_sales (full-width) ─────────────────────────
+        _feat = next(t for t in _tables if t["table_id"] == "mrt_sales")
+        with st.container(border=True):
+            _fc1, _fc2, _fc3 = st.columns([1, 5, 2])
+            with _fc1:
+                st.markdown(
+                    f"<div style='font-size:2.5rem; text-align:center; padding-top:0.5rem'>{_feat['icon']}</div>",
+                    unsafe_allow_html=True,
+                )
+            with _fc2:
+                st.markdown(f"**{_feat['display_name']}** ⭐ *Featured*")
+                st.caption(_feat["description"])
+                st.caption(
+                    f"📐 {_feat['grain']} · ~{_feat['approx_rows']} rows · {_feat['columns']} columns"
+                )
+            with _fc3:
+                if st.button("Load →", key="load_mrt_sales", type="primary", use_container_width=True):
+                    st.session_state.enterprise_table_id = _feat["table_id"]
+                    st.session_state.enterprise_dataset_name = _feat["display_name"]
+                    st.session_state.sessions[_current_sid]["name"] = f"🏢 {_feat['display_name']}"
+                    with st.spinner(f"Loading {_feat['display_name']}…"):
+                        _df = load_table(_feat["table_id"])
+                    st.session_state.modified_df = _df.copy()
+                    st.session_state.original_df = _df.copy()
+                    _auto = (
+                        "[AUTO-ANALYSIS]\n\n"
+                        f"[System Context]: The dataset is '{_feat['display_name']}' from the "
+                        "DataVerse warehouse (pre-cleaned and validated by dbt). "
+                        "Recommend 5 specific insights or analyses the user could explore. "
+                        "Do NOT create any charts yet."
+                    )
+                    with st.spinner("Generating analysis recommendations…"):
+                        _run_agent_and_save(_auto)
+                    st.rerun()
+
+        st.markdown("")
+
+        # ── Remaining 4 tables in 2-column grid ───────────────────────────
+        _other = [t for t in _tables if t["table_id"] != "mrt_sales"]
+        _col_l, _col_r = st.columns(2)
+        for _i, _tbl in enumerate(_other):
+            with (_col_l if _i % 2 == 0 else _col_r):
+                with st.container(border=True):
+                    st.markdown(
+                        f"<div style='font-size:1.8rem; text-align:center'>{_tbl['icon']}</div>",
+                        unsafe_allow_html=True,
+                    )
+                    st.markdown(f"**{_tbl['display_name']}**")
+                    st.caption(_tbl["description"])
+                    st.caption(f"~{_tbl['approx_rows']} rows · {_tbl['columns']} cols")
+                    if st.button("Load →", key=f"load_{_tbl['table_id']}", use_container_width=True):
+                        st.session_state.enterprise_table_id = _tbl["table_id"]
+                        st.session_state.enterprise_dataset_name = _tbl["display_name"]
+                        st.session_state.sessions[_current_sid]["name"] = f"🏢 {_tbl['display_name']}"
+                        with st.spinner(f"Loading {_tbl['display_name']}…"):
+                            _df = load_table(_tbl["table_id"])
+                        st.session_state.modified_df = _df.copy()
+                        st.session_state.original_df = _df.copy()
+                        _auto = (
+                            "[AUTO-ANALYSIS]\n\n"
+                            f"[System Context]: The dataset is '{_tbl['display_name']}' from the "
+                            "DataVerse warehouse (pre-cleaned and validated by dbt). "
+                            "Recommend 5 specific insights or analyses the user could explore. "
+                            "Do NOT create any charts yet."
+                        )
+                        with st.spinner("Generating analysis recommendations…"):
+                            _run_agent_and_save(_auto)
+                        st.rerun()
+
+    st.stop()  # Don't fall through to the POC upload hero
+
+
+# ── BRANCH B: No data loaded yet → Upload-First Landing (POC) ────────────
 if st.session_state.modified_df is None:
+
     st.markdown("")
     # Centered hero layout
     _left_spacer, center_col, _right_spacer = st.columns([1, 2, 1])
@@ -920,11 +1035,12 @@ else:
 
                 with st.spinner("Enriching question..."):
                     try:
-                        # Pass last 5 messages for context
+                        # Pass last 5 messages for context + dataset name in enterprise mode
                         enriched_question, usage = enrich_query(
-                            user_text, 
+                            user_text,
                             st.session_state.modified_df,
-                            chat_history=st.session_state.messages[-5:]
+                            chat_history=st.session_state.messages[-5:],
+                            dataset_name=st.session_state.get("enterprise_dataset_name"),
                         )
                         st.session_state.usage.record_api_call(usage)
                     except Exception:
