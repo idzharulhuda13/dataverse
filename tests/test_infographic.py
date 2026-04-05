@@ -5,12 +5,14 @@ import io
 import matplotlib
 matplotlib.use("Agg")  # Use non-interactive backend for testing
 import matplotlib.pyplot as plt
+import pandas as pd
 
 from dataverse_agent.infographic import (
     render_infographic_pdf,
     _parse_agent_response,
     _fallback_content,
     _prepare_chart_images,
+    _calculate_metric_values,
 )
 
 
@@ -49,6 +51,12 @@ def _make_mock_content(chart_count=2):
             "Customer retention improved by 8% in Q3",
         ],
         "conclusion": "The data reveals strong growth with concentration in electronics. Diversification is recommended.",
+        "calculated_metrics": [
+            {"label": "Total Revenue", "value": 150000, "op": "sum"},
+            {"label": "Avg Order", "value": 125, "op": "mean"},
+            {"label": "Unique SKUs", "value": 450, "op": "nunique"},
+            {"label": "Total Orders", "value": 1200, "op": "count"},
+        ]
     }
 
 
@@ -234,3 +242,53 @@ class TestPrepareChartImages:
         ]
         images = _prepare_chart_images(items)
         assert len(images) == 1
+
+
+# ── Metric Calculation Tests ─────────────────────────────────────────────────
+
+
+class TestCalculateMetricValues:
+    """Tests for _calculate_metric_values()."""
+
+    def test_calculates_correct_values(self):
+        df = pd.DataFrame({
+            "revenue": [100, 200, 300],
+            "category": ["A", "A", "B"],
+            "id": [1, 2, 3]
+        })
+        metrics = [
+            {"label": "Total Rev", "column": "revenue", "op": "sum"},
+            {"label": "Avg Rev", "column": "revenue", "op": "mean"},
+            {"label": "Cat Count", "column": "category", "op": "nunique"},
+            {"label": "Row Count", "column": "id", "op": "count"}
+        ]
+        
+        results = _calculate_metric_values(df, metrics)
+        
+        assert len(results) == 4
+        assert results[0]["value"] == 600
+        assert results[1]["value"] == 200
+        assert results[2]["value"] == 2
+        assert results[3]["value"] == 3
+
+    def test_handles_invalid_columns(self):
+        df = pd.DataFrame({"a": [1, 2]})
+        metrics = [{"label": "Invalid", "column": "missing", "op": "sum"}]
+        
+        results = _calculate_metric_values(df, metrics)
+        
+        # Should fallback to row count (2)
+        assert results[0]["label"] == "Total Records"
+        assert results[0]["value"] == 2
+
+    def test_flexible_metric_counts(self):
+        df = pd.DataFrame({"a": [1, 2, 3]})
+        # Test with 1 metric
+        metrics_1 = [{"label": "One", "column": "a", "op": "sum"}]
+        results_1 = _calculate_metric_values(df, metrics_1)
+        assert len(results_1) == 1
+        
+        # Test with 6 metrics
+        metrics_6 = [{"label": f"M{i}", "column": "a", "op": "count"} for i in range(6)]
+        results_6 = _calculate_metric_values(df, metrics_6)
+        assert len(results_6) == 6
