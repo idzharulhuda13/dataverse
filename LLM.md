@@ -58,6 +58,7 @@ DataVerse/
 │   │   ├── forecast.py            ← Time-series forecasting (Prophet)
 │   │   ├── cleaning.py            ← Data transformations & quality
 │   │   └── enricher.py            ← Stateless query rewriting/alignment (direct Gemini call)
+│   ├── infographic.py             ← Agent-driven infographic generation and PDF rendering
 │   └── prompts/                   ← Markdown prompt files for each agent
 │       ├── __init__.py            ← load_prompt(name) utility
 │       ├── orchestrator.md
@@ -250,6 +251,12 @@ Randomized message pools:
   - `.record_trace(event_type, agent_name, detail, metadata)` — appends a TraceEvent
   - `.clear_trace()` — resets trace list at start of new request
 
+### `dataverse_agent/infographic.py` — Agent-driven Infographic
+
+Handles generating magazine-style infographic PDFs. Two-step pipeline:
+1. `generate_infographic_content`: Sends all pinned chart images via Gemini Vision API to get a structured JSON narrative (title, subtitle, takeaways, etc.).
+2. `render_infographic_pdf`: Composes the agent-generated narrative and chart figures into a styled A4 PDF utilizing `reportlab`.
+
 ### `dataverse_agent/commands.py` — Slash Command System
 
 `handle_slash_command(prompt, df, usage_stats) → (handled: bool, response: str | dict)`
@@ -264,6 +271,7 @@ Deterministic operations that bypass the LLM pipeline entirely:
 | `/head [N]` | Returns first N rows as markdown (default 5) |
 | `/cost` | Returns token usage + estimated cost from `SessionUsage` |
 | `/export` | Returns `{"action": "export"}` for UI download button |
+| `/infographic` | Returns `{"action": "infographic"}` for generating a PDF infographic |
 | `/undo` | Returns `{"action": "undo"}` — dashboard restores `previous_df` |
 | `/pin` | Returns `{"action": "pin"}` — dashboard pins last figure |
 | `/clear` | Returns `{"action": "clear"}` — dashboard clears message history |

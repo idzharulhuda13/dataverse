@@ -15,6 +15,7 @@ from models.utils import load_dataframe, get_excel_sheet_names, extract_non_code
 from dataverse_agent.agent import root_agent
 from dataverse_agent.agents.enricher import enrich_query
 from dataverse_agent.tools import set_session_context, get_session_figures, get_final_df, get_display_df
+from dataverse_agent.infographic import generate_infographic_content, render_infographic_pdf
 from dataverse_agent.usage import SessionUsage
 from dataverse_agent.commands import handle_slash_command
 from dataverse_agent.messages import (
@@ -777,6 +778,40 @@ else:
                             key=f"dl_{idx}"
                         )
 
+                # ── Handle Infographic Action ──────────────────────────
+                if msg.get("action") == "infographic":
+                    if st.session_state.dashboard_items:
+                        if not st.session_state.get("infographic_pdf"):
+                            with st.spinner("🎨 Agent is creating your infographic..."):
+                                from dataverse_agent.tools import get_session_data_summary
+                                set_session_context(st.session_state.modified_df)
+                                current_sid = st.session_state.current_session_id
+                                try:
+                                    agent_content = asyncio.run(generate_infographic_content(
+                                        runner=st.session_state.runner,
+                                        session_id=current_sid,
+                                        dashboard_items=st.session_state.dashboard_items,
+                                        data_summary=get_session_data_summary(),
+                                        dataset_name=st.session_state.sessions[current_sid]["name"],
+                                        usage_tracker=st.session_state.usage,
+                                    ))
+                                    pdf_bytes = render_infographic_pdf(
+                                        content=agent_content,
+                                        dashboard_items=st.session_state.dashboard_items,
+                                        dataset_name=st.session_state.sessions[current_sid]["name"],
+                                    )
+                                    st.session_state.infographic_pdf = pdf_bytes
+                                except Exception as e:
+                                    st.error(f"⚠️ Infographic generation failed: {e}")
+                        if st.session_state.get("infographic_pdf"):
+                            st.download_button(
+                                label="📥 Download Infographic PDF",
+                                data=st.session_state.infographic_pdf,
+                                file_name=f"dataverse_infographic_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                                mime="application/pdf",
+                                key=f"dl_infographic_{idx}",
+                            )
+
         # ── Chat Input Box ────────────────────────────────────────────────
         if prompt := st.chat_input("Ask for a visualization (attach a data file)...", accept_file="multiple"):
             user_text = (
@@ -844,6 +879,19 @@ else:
                             "action": "export",
                             "args": response.get("args")
                         })
+                    elif action == "infographic":
+                        st.session_state.messages.append({"role": "user", "content": user_text})
+                        if st.session_state.dashboard_items:
+                            st.session_state.messages.append({
+                                "role": "assistant",
+                                "content": "📄 Generating infographic...",
+                                "action": "infographic",
+                            })
+                        else:
+                            st.session_state.messages.append({
+                                "role": "assistant",
+                                "content": "⚠️ No pinned charts found. Pin some visualizations first, then try `/infographic` again.",
+                            })
                 
                 _save_current_session()
                 st.rerun()
@@ -894,6 +942,48 @@ else:
     with dash_col:
         st.subheader("📊 Generated Dashboard")
         st.markdown("Your pinned visualizations will appear here in real-time.")
+
+        # ── Infographic Generation Button ──────────────────────────────
+        if st.session_state.dashboard_items:
+            infographic_col1, infographic_col2 = st.columns([1, 1])
+            with infographic_col1:
+                if st.button("📄 Generate Infographic", key="gen_infographic",
+                             use_container_width=True, type="secondary"):
+                    with st.spinner("🎨 Agent is summarizing your dashboard..."):
+                        from dataverse_agent.tools import get_session_data_summary
+                        set_session_context(st.session_state.modified_df)
+                        current_sid = st.session_state.current_session_id
+                        try:
+                            agent_content = asyncio.run(generate_infographic_content(
+                                runner=st.session_state.runner,
+                                session_id=current_sid,
+                                dashboard_items=st.session_state.dashboard_items,
+                                data_summary=get_session_data_summary(),
+                                dataset_name=st.session_state.sessions[current_sid]["name"],
+                                usage_tracker=st.session_state.usage,
+                            ))
+                            pdf_bytes = render_infographic_pdf(
+                                content=agent_content,
+                                dashboard_items=st.session_state.dashboard_items,
+                                dataset_name=st.session_state.sessions[current_sid]["name"],
+                            )
+                            st.session_state.infographic_pdf = pdf_bytes
+                        except Exception as e:
+                            st.error(f"⚠️ Failed to generate infographic: {e}")
+                    st.rerun()
+
+            with infographic_col2:
+                if st.session_state.get("infographic_pdf"):
+                    st.download_button(
+                        label="📥 Download PDF",
+                        data=st.session_state.infographic_pdf,
+                        file_name=f"dataverse_infographic_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                        mime="application/pdf",
+                        key="dl_infographic",
+                        use_container_width=True,
+                        type="primary",
+                    )
+
         st.divider()
 
         if not st.session_state.dashboard_items:

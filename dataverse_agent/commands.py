@@ -35,6 +35,7 @@ def handle_slash_command(prompt: str, df: pd.DataFrame, usage_stats=None):
 | `/columns` | List all columns and their data types. |
 | `/head [N]` | Show the first N rows (default: 5). |
 | `/export` | Download the current cleaned dataset as CSV. |
+| `/infographic` | Generate a PDF infographic from pinned dashboard charts. |
 | `/undo` | Revert the last data cleaning operation. |
 | `/pin` | Pin the last generated visualization to the dashboard. |
 | `/clear` | Clear the current chat history. |
@@ -73,7 +74,7 @@ def handle_slash_command(prompt: str, df: pd.DataFrame, usage_stats=None):
         return True, "Usage tracking not available."
 
     # Special actions that need UI-level handling
-    if cmd in ('/export', '/undo', '/pin', '/clear'):
+    if cmd in ('/export', '/undo', '/pin', '/clear', '/infographic'):
         return True, {"action": cmd[1:], "args": args}
 
     return True, f"Unknown command: `{cmd}`. Type `/help` for available commands."
