@@ -603,6 +603,36 @@ def _run_agent_and_save(llm_prompt: str, user_display_text: str | None = None):
     _save_current_session()
 
 
+def _generate_infographic():
+    """Helper to generate an infographic PDF from the current dashboard items."""
+    from dataverse_agent.tools import get_session_data_summary
+    set_session_context(st.session_state.modified_df)
+    current_sid = st.session_state.current_session_id
+    try:
+        agent_content = asyncio.run(generate_infographic_content(
+            runner=st.session_state.runner,
+            session_id=current_sid,
+            dashboard_items=st.session_state.dashboard_items,
+            data_summary=get_session_data_summary(),
+            dataset_name=st.session_state.sessions[current_sid]["name"],
+            df=st.session_state.modified_df,
+            usage_tracker=st.session_state.usage,
+        ))
+        pdf_bytes = render_infographic_pdf(
+            content=agent_content,
+            dashboard_items=st.session_state.dashboard_items,
+            dataset_name=st.session_state.sessions[current_sid]["name"],
+        )
+        st.session_state.infographic_pdf = pdf_bytes
+        st.toast("✅ Infographic ready for download!", icon="✨")
+        if "infographic_error" in st.session_state:
+            st.session_state.infographic_error = None
+        return True
+    except Exception as e:
+        st.session_state.infographic_error = str(e)
+        return False
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # 4. MAIN LAYOUT — UPLOAD-FIRST or CHAT + DASHBOARD
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -899,32 +929,8 @@ else:
                         if not st.session_state.get("infographic_pdf"):
                             with st.spinner("🎨 Agent is creating your infographic..."):
                                 st.toast("🎨 Starting infographic generation...", icon="🎨")
-                                from dataverse_agent.tools import get_session_data_summary
-                                set_session_context(st.session_state.modified_df)
-                                current_sid = st.session_state.current_session_id
-                                try:
-                                    agent_content = asyncio.run(generate_infographic_content(
-                                        runner=st.session_state.runner,
-                                        session_id=current_sid,
-                                        dashboard_items=st.session_state.dashboard_items,
-                                        data_summary=get_session_data_summary(),
-                                        dataset_name=st.session_state.sessions[current_sid]["name"],
-                                        df=st.session_state.modified_df,
-                                        usage_tracker=st.session_state.usage,
-                                    ))
-                                    pdf_bytes = render_infographic_pdf(
-                                        content=agent_content,
-                                        dashboard_items=st.session_state.dashboard_items,
-                                        dataset_name=st.session_state.sessions[current_sid]["name"],
-                                    )
-                                    st.session_state.infographic_pdf = pdf_bytes
-                                    st.toast("✅ Infographic ready for download!", icon="✨")
-                                    # Clear old errors on success
-                                    if "infographic_error" in st.session_state:
-                                        st.session_state.infographic_error = None
+                                if _generate_infographic():
                                     st.rerun()
-                                except Exception as e:
-                                    st.session_state.infographic_error = str(e)
                         if st.session_state.get("infographic_pdf"):
                             st.download_button(
                                 label="📥 Download Infographic PDF",
@@ -1080,31 +1086,8 @@ else:
                              use_container_width=True, type="secondary"):
                     st.toast("📡 Contacting agent for summary...", icon="🤖")
                     with st.spinner("🎨 Agent is summarizing your dashboard..."):
-                        from dataverse_agent.tools import get_session_data_summary
-                        set_session_context(st.session_state.modified_df)
-                        current_sid = st.session_state.current_session_id
-                        try:
-                            agent_content = asyncio.run(generate_infographic_content(
-                                runner=st.session_state.runner,
-                                session_id=current_sid,
-                                dashboard_items=st.session_state.dashboard_items,
-                                data_summary=get_session_data_summary(),
-                                dataset_name=st.session_state.sessions[current_sid]["name"],
-                                df=st.session_state.modified_df,
-                                usage_tracker=st.session_state.usage,
-                            ))
-                            pdf_bytes = render_infographic_pdf(
-                                content=agent_content,
-                                dashboard_items=st.session_state.dashboard_items,
-                                dataset_name=st.session_state.sessions[current_sid]["name"],
-                            )
-                            st.session_state.infographic_pdf = pdf_bytes
-                            st.toast("✨ Infographic generated successfully!", icon="✅")
-                            # Remove any old error
-                            st.session_state.infographic_error = None
+                        if _generate_infographic():
                             st.rerun()
-                        except Exception as e:
-                            st.session_state.infographic_error = str(e)
 
             with infographic_col2:
                 if st.session_state.get("infographic_pdf"):
