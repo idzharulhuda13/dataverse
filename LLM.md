@@ -21,6 +21,7 @@ DataVerse is an **AI-powered, conversational data analysis and visualization too
 | **Agent Framework** | Google ADK (`google.adk`) — `Runner`, `Agent`, `FunctionTool` |
 | **LLM** | Google Gemini (model from `GEMINI_MODEL` env var, default: `gemini-3.1-flash-lite-preview`) |
 | **Data** | Pandas DataFrames (CSV, Excel, Parquet, JSON, TSV) |
+| **Warehouse** | DuckDB + dbt (`dbt/dataverse/dataverse_warehouse.duckdb`) |
 | **Visualization** | Seaborn + Matplotlib |
 | **Forecasting** | Facebook Prophet |
 | **Package Manager** | `uv` (lockfile: `uv.lock`) |
@@ -28,7 +29,7 @@ DataVerse is an **AI-powered, conversational data analysis and visualization too
 
 ### Key Dependencies (`pyproject.toml`)
 ```
-google-adk>=1.27.2, google-genai>=1.68.0, gpt4all>=2.8.2,
+google-adk>=1.27.2, google-genai>=1.68.0, gpt4all>=2.8.2, dbt-duckdb>=1.10.1,
 matplotlib>=3.10.8, openpyxl>=3.1.0, pandas>=2.3.3, prophet>=1.3.0,
 python-dotenv>=1.2.2, seaborn>=0.13.2, streamlit>=1.55.0
 ```
@@ -43,6 +44,9 @@ DataVerse/
 ├── streamlit_agent_dashboard.py   ← PRIMARY APP — Multi-agent dashboard (run this)
 ├── streamlit_chatbot.py           ← Legacy: local GPT4All chatbot (not primary)
 ├── streamlit_chatbot_api.py       ← Legacy: Gemini API chatbot (not primary)
+│
+├── dbt/
+│   └── dataverse/                 ← dbt models, config, and dataverse_warehouse.duckdb
 │
 ├── dataverse_agent/               ← Agent package
 │   ├── __init__.py                ← Imports agent.py
@@ -68,6 +72,7 @@ DataVerse/
 │       └── enricher.md
 │
 ├── models/                        ← Core utilities
+│   ├── duckdb_connector.py        ← Warehouse table registry and DuckDB loader
 │   ├── sandbox.py                 ← 4-layer secure Python execution sandbox
 │   ├── utils.py                   ← CSV loading, code extraction, execute_python_code wrapper
 │   ├── prompt_template.py         ← Legacy single-agent prompt template
@@ -227,8 +232,9 @@ sessions[sid] = {
 st.session_state.is_logged_in       # bool — admin auth state
 st.session_state.show_observability # bool — show activity trace (admin only)
 st.session_state.show_usage_budget  # bool — show budget panel (admin only)
+st.session_state.enterprise_mode    # bool — toggle between CSV upload and predefined DuckDB marts
 st.session_state.max_budget_turns   # int — turn limit before blocking
-st.session_state.original_df       # DataFrame — immutable backup from initial upload (restore point)
+st.session_state.original_df        # DataFrame — immutable backup from initial upload (restore point)
 ```
 
 ### `dataverse_agent/messages.py` — Chat Messages
