@@ -17,14 +17,14 @@ WAREHOUSE_PATH = _PROJECT_ROOT / "dbt" / "dataverse" / "dataverse_warehouse.duck
 # Manually maintained for now. Future: auto-scan from dbt manifest.json
 TABLE_REGISTRY: dict[str, dict] = {
     "mrt_sales": {
-        "display_name": "Chocolate Sales — Latest 6 Months",
-        "description": "Transactional data filtered at the source model (dbt) to only include the last 6 months of data (~250k rows).",
+        "display_name": "Chocolate Sales — Transactions",
+        "description": "Full order-level transactions with customer, product, store, and time dimensions pre-joined.",
         "schema": "main_chocolate_sales_mrt",
         "icon": "🛒",
         "grain": "One row per order",
         "approx_rows": "250,000",
         "columns": 44,
-        "tags": ["sales", "transactions", "OBT", "filtered"],
+        "tags": ["sales", "transactions", "OBT"],
     },
     "mrt_customer_summary": {
         "display_name": "Customer Summary",
@@ -58,11 +58,11 @@ TABLE_REGISTRY: dict[str, dict] = {
     },
     "mrt_daily_sales": {
         "display_name": "Daily Sales Trend",
-        "description": "Time-series at daily grain covering 2023–2024. Ideal for trend analysis and forecasting.",
+        "description": "Time-series at daily grain. Ideal for high-density trend analysis and forecasting.",
         "schema": "main_chocolate_sales_mrt",
         "icon": "📈",
         "grain": "One row per calendar day",
-        "approx_rows": "731",
+        "approx_rows": "185",
         "columns": 20,
         "tags": ["time-series", "trends", "forecasting"],
     },
