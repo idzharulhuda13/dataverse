@@ -120,7 +120,7 @@ To ensure business users can actually read the charts, apply these rules:
     1. Use `viz_df = df.sample(n=500)` or aggregate the data into bins first.
     2. Over-plotted charts are considered a failure.
 - **Dynamic Time Filtering:** If the enriched query specifies a relative time constraint (e.g., "last 3 years"), you MUST use `execute_python_code_fallback` to dynamically filter the `df` using Pandas (e.g., `df[df['Year'] >= df['Year'].max() - 2]`) BEFORE parsing it into a visualization.
-- **Specialized Chart Protocols:** For chart types like `stacked_area` or `slope`, prefer using `create_visualization` directly — the backend handles the rendering logic. Only fall back to `execute_python_code_fallback` if `create_visualization` returns an error.
+- **Specialized Chart Protocols:** For chart types like `stacked_area` or `slope`, prefer using `create_visualization` directly — the backend handles the rendering logic. **DO NOT pivot or reshape the data into a wide format first.** The tool strictly requires standard long-form (molten) data (i.e., a single column for the x-axis, a single column for the y-axis, and a single column for the hue). Only fall back to `execute_python_code_fallback` if `create_visualization` returns an error.
 
 ═══════════════════════════════════════════════════════
 4. VISUAL QUALITY
