@@ -65,18 +65,17 @@ class TestQuestion:
 STRESS_TEST_QUESTIONS: list[TestQuestion] = [
     TestQuestion(
         id="Q1",
-        question="Economy Impact: When the global economy (GDP) slows down, do our sales drop immediately, or are we protected? (Dual-axis Line Chart)",
+        question="2026 Outlook: Based on our current momentum, what do we expect our sales to look like next year? (Trend Forecast)",
         expected_chart_type="line",
         checks=[
             "chart_generated",
-            "no_hallucination",
             "dataset_intact",
         ],
     ),
     TestQuestion(
         id="Q2",
-        question="Gas Prices vs. EVs: Do people buy more electric cars when gas prices go up? (Correlation Scatter Plot)",
-        expected_chart_type="scatter",
+        question="Electric Dominance: At what point (which year) will electric car revenue finally overtake traditional gas car revenue? (Crossover Chart)",
+        expected_chart_type="line",
         checks=[
             "chart_generated",
             "dataset_intact",
@@ -84,8 +83,8 @@ STRESS_TEST_QUESTIONS: list[TestQuestion] = [
     ),
     TestQuestion(
         id="Q3",
-        question="Pricing Strategy: Did raising our prices over the years cause us to lose customers, or did they keep buying? (Price vs. Volume Regression)",
-        expected_chart_type="scatter",
+        question="Sensitivity Analysis: If the economy drops by 2% next year, what is the \"worst-case scenario\" for our revenue? (Scenario/Sensitivity Visualization)",
+        expected_chart_type="bar",
         checks=[
             "chart_generated",
             "dataset_intact",
@@ -93,8 +92,8 @@ STRESS_TEST_QUESTIONS: list[TestQuestion] = [
     ),
     TestQuestion(
         id="Q4",
-        question="Regional Stability: Which region's sales fluctuate the most, and which is the most \"steady\"? (Volatility/Box Plot)",
-        expected_chart_type="box",
+        question="Market Maturity: Which markets are \"saturated\" (staying_flat) and which are \"emerging\" (growing fast)? (Growth-Share Matrix)",
+        expected_chart_type="scatter",
         checks=[
             "chart_generated",
             "dataset_intact",
@@ -102,11 +101,10 @@ STRESS_TEST_QUESTIONS: list[TestQuestion] = [
     ),
     TestQuestion(
         id="Q5",
-        question="Product Life Cycle: When we introduce a new model (like the iX), does it \"steal\" sales from our older models (like the X5)? (Cannibalization Stacked Chart)",
-        expected_chart_type="stacked_area",
+        question="Profitability Sweet Spot: Which combination of model and region gives us the best \"bang for our buck\" (highest revenue with lowest volatility)? (Heatmap)",
+        expected_chart_type="heatmap",
         checks=[
             "chart_generated",
-            "estimator_sum",
             "dataset_intact",
         ],
     ),
