@@ -21,7 +21,7 @@ test:
 	uv run pytest
 
 stress-test:
-	uv run python tests/stress_test.py
+	uv run python tests/stress_test.py $(ARGS)
 
 clean:
 	rm -rf __pycache__
