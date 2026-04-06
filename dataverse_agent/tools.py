@@ -186,7 +186,7 @@ def create_visualization(chart_type: str, x_column: str, y_column: str = None, y
         y_column: The name of the column for the Y-axis (optional for some charts).
         y2_column: The name of the column for the secondary Y-axis (optional, used for dual-axis line charts).
         hue: The name of the column to group by color (optional).
-        estimator: Statistical function to use for aggregation ('mean', 'sum', 'count', 'min', 'max'). Defaults to 'mean'.
+        estimator: Statistical function to use for aggregation ('mean', 'sum', 'count', 'min', 'max', 'std'). Defaults to 'mean'.
         title: The title of the chart (e.g. "Revenue by Region").
         subtitle: A descriptive label shown below the title (e.g. "Comparison of total units sold by model type").
         sort_order: How to sort categorical bars — 'ascending' (default), 'descending', or 'none' (dataset order).
@@ -198,10 +198,11 @@ def create_visualization(chart_type: str, x_column: str, y_column: str = None, y
     if df is None:
         return "Error: No dataset loaded."
 
-    # ── Elegant Color Palette ────────────────────────────────────────────
-    PALETTE = ["#2D3A4A", "#4A7C8F", "#7BA7A9", "#B8D4D2", "#D4A574", "#C4786C", "#8B6F8E", "#A3B5C7"]
-    HIGHLIGHT = "#2D3A4A"   # deep navy
-    ACCENT = "#D4A574"      # warm gold
+    # ── Elegant DataVerse Branding ───────────────────────────────────────
+    # Primary Palette: Deep Navy and Warm Gold with slate accents
+    PALETTE = ["#2D3A4A", "#D4A574", "#4A7C8F", "#7BA7A9", "#B8D4D2", "#C4786C", "#8B6F8E", "#A3B5C7"]
+    HIGHLIGHT = "#2D3A4A"   # DataVerse Navy
+    ACCENT = "#D4A574"      # DataVerse Gold
     BG_COLOR = "#FAFBFC"
     TEXT_COLOR = "#1E293B"  # slate-800
     CAPTION_COLOR = "#64748B"  # slate-500
@@ -216,6 +217,8 @@ def create_visualization(chart_type: str, x_column: str, y_column: str = None, y
         "xtick.color": CAPTION_COLOR,
         "ytick.color": CAPTION_COLOR,
         "text.color": TEXT_COLOR,
+        "font.family": "sans-serif",
+        "font.sans-serif": ["Inter", "Public Sans", "Segoe UI", "Roboto", "Arial"],
         "font.size": 11,
         "axes.titlesize": 14,
         "axes.labelsize": 12,
@@ -272,7 +275,7 @@ def create_visualization(chart_type: str, x_column: str, y_column: str = None, y
                 cat_col = y_column if is_horizontal else x_column
                 num_col = x_column if is_horizontal else y_column
                 if cat_col and num_col and cat_col in df.columns and num_col in df.columns:
-                    agg_func = estimator if estimator in ("sum", "min", "max") else "mean"
+                    agg_func = estimator if estimator in ("sum", "min", "max", "std", "count") else "mean"
                     ascending = sort_order != "descending"
                     bar_order = (
                         df.groupby(cat_col)[num_col]
@@ -363,8 +366,32 @@ def create_visualization(chart_type: str, x_column: str, y_column: str = None, y
             ax.set_xlim(min(x_vals) - (max(x_vals)-min(x_vals))*0.1, max(x_vals) + (max(x_vals)-min(x_vals))*0.1)
             use_legend = True
         elif chart_type == 'heatmap':
-            numeric_df = df.select_dtypes(include='number')
-            sns.heatmap(numeric_df.corr(), annot=True, fmt=".2f", cmap="RdYlBu_r", ax=ax, linewidths=0.5, square=True, cbar_kws={"shrink": 0.8})
+            # Pivot heatmap requires 3 dimensions: Index (x), Columns (hue), and Metric (y)
+            if x_column and (hue or y_column):
+                # Map arguments to pivot dimensions:
+                # If hue is missing, but y_column is categorical, it might be the hue!
+                # We need a numeric column for values.
+                idx = x_column
+                cols = hue if hue and hue in df.columns else (y_column if y_column in df.columns and not pd.api.types.is_numeric_dtype(df[y_column]) else None)
+                vals = y_column if y_column in df.columns and pd.api.types.is_numeric_dtype(df[y_column]) else (hue if hue and pd.api.types.is_numeric_dtype(df[hue]) else None)
+                
+                # If we still lack a metric or columns, try to find one numeric column automatically
+                if not vals:
+                    numeric_cols = df.select_dtypes(include='number').columns
+                    if len(numeric_cols) > 0:
+                        vals = numeric_cols[0]
+                
+                if idx and cols and vals:
+                    pivot_df = df.pivot_table(index=idx, columns=cols, values=vals, aggfunc=estimator)
+                    # Auto-sort by the across-columns average to highlight the "Sweet Spot"
+                    pivot_df = pivot_df.reindex(pivot_df.mean(axis=1).sort_values(ascending=sort_order != "descending").index)
+                    sns.heatmap(pivot_df, annot=True, fmt=".0f" if estimator == "sum" else ".1f", cmap="YlGnBu", ax=ax, linewidths=0.5, cbar_kws={"shrink": 0.8})
+                else:
+                    return f"Error: Heatmap requires an index (x_column), columns (hue/y_column), and a numeric metric (y_column). Found: x={idx}, cols={cols}, values={vals}."
+            else:
+                # Default correlation heatmap
+                numeric_df = df.select_dtypes(include='number')
+                sns.heatmap(numeric_df.corr(), annot=True, fmt=".2f", cmap="RdYlBu_r", ax=ax, linewidths=0.5, square=True, cbar_kws={"shrink": 0.8})
         elif chart_type == 'pie':
             if y_column:
                 pie_data = df.groupby(x_column)[y_column].sum()
@@ -614,9 +641,29 @@ def create_table(table_code: str, title: str = None, subtitle: str = None) -> st
         
     return "Error: The code did not produce a valid table."
 
+def calculate_weighted_metric(metric_col: str, weight_col: str, label: str = None) -> str:
+    """Helper to calculate weighted metrics (e.g. revenue split by share).
+    Usage: `viz_df = calculate_weighted_metric('Revenue_EUR', 'BEV_Share', 'Electric Revenue')`
+    
+    This creates a new dataframe with the weighted metric applied as the primary Y-axis value.
+    """
+    df = _get_df()
+    if df is None:
+        return "Error: No dataset loaded."
+    
+    col_name = label if label else f"{metric_col} (Weighted)"
+    
+    # Calculate the weighted value and store it in a temp scoped df
+    viz_df = df.copy()
+    viz_df[col_name] = viz_df[metric_col] * viz_df[weight_col]
+    
+    _local.viz_temp_df = viz_df
+    return f"Weighted metric '{col_name}' calculated. You can now use this column for visualization."
+
 viz_tool = FunctionTool(func=create_visualization)
 summary_tool = FunctionTool(func=get_data_summary)
 table_tool = FunctionTool(func=create_table)
 fallback_tool = FunctionTool(func=execute_python_code_fallback)
+weighted_tool = FunctionTool(func=calculate_weighted_metric)
 
-TOOLS = [viz_tool, summary_tool, table_tool, fallback_tool]
+TOOLS = [viz_tool, summary_tool, table_tool, fallback_tool, weighted_tool]

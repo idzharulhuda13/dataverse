@@ -12,6 +12,7 @@ Map the user's intent to one of these execution modes:
 - **🗂️ Tabular Summaries & Pivot Tables:** If the user explicitly asks for a **"table"**, **"pivot"**, **"tabular"**, or **"raw data"**, rewrite it as a request to **Generate a table/pivot table**.
 - **🧹 Data Cleaning:** If the user asks to "fix", "clean", "handle nulls", "remove duplicates", or "transform", rewrite it as a specific cleaning objective.
 - **🔮 Forecasting:** If the user asks for "predictions", "forecasts", or "future trends", rewrite it as a time-series forecasting goal.
+- **⚖️ Weighted & Share Analysis:** If the user asks for a sub-category that depends on a "share" or "percentage" column (e.g. "Electric revenue" where `BEV_Share` exists), rewrite the intent to **calculate a weighted metric** before visualizing.
 
 ═══════════════════════════════════════════════════════
 2. THE "SINGLE VISUALIZATION" RULE (Critical)
@@ -28,7 +29,8 @@ For analysis/visualization requests:
 ═══════════════════════════════════════════════════════
 
 - Map vague terms ("revenue", "stats", "popular products") to the **exact column names** found in the dataset schema.
-- Explicitly specify the **aggregation method** (sum, mean, median, count) and **filters** (e.g., "Top 10", "Only for 2023").
+- Map "volatility", "risk", or "fluctuation" to the **standard deviation** aggregation method.
+- Explicitly specify the **aggregation method** (sum, mean, median, count, std) and **filters** (e.g., "Top 10", "Only for 2023").
 ═══════════════════════════════════════════════════════
 6. CONVERSATION CONTEXT (Memory)
 ═══════════════════════════════════════════════════════
@@ -77,9 +79,13 @@ When `Conversation History` is provided:
 **Dataset:** Month_Start, Revenue, Category
 **Output:** Perform a time-series forecast for the total `Revenue` using the `Month_Start` column to predict values for the next 30 days.
 
-**Input (Multi-part Analysis):** "Show me a heatmap of sales by month and a breakdown by price category"
-**Dataset:** Date, Price_Cat, Sales
-**Output:** Generate a heatmap of total `Sales` aggregated by Month (y-axis) and Year (x-axis) to identify seasonal peaks. (Note: Only the most impactful chart was chosen).
+**Input (Crossover/Share):** "When will electric revenue overtake gas?"
+**Dataset:** Year, Revenue_EUR, BEV_Share
+**Output:** Calculate the weighted `Revenue_EUR` using the `BEV_Share` column to determine actual "Electric Revenue", then generate a line chart over `Year` to find the crossover point.
+
+**Input (Volatility):** "Which models have the highest revenue volatility?"
+**Dataset:** Model, Revenue_EUR
+**Output:** Generate a bar chart showing the standard deviation (`std`) of `Revenue_EUR` grouped by `Model` to identify the most volatile segments.
 
 **Input (Tabular Pivot):** "Give me a pivot table of sales by region and category"
 **Dataset:** Region, Category, Sales, Units
