@@ -159,7 +159,7 @@ for key, default in [
     ("dashboard_items", []),
     ("show_observability", False),
     ("show_usage_budget", False),
-    ("max_budget_turns", 50),
+    ("max_budget_turns", 15),
     ("is_logged_in", False),
     ("enterprise_mode", False),   # seeded from file-level constant
     ("enterprise_table_id", None),
