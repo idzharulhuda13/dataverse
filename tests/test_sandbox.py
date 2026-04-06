@@ -339,6 +339,34 @@ eval("1+1")
 # 🔗 INTEGRATION: safe_execute() end-to-end result validation
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+class TestBlockedFileWrites:
+    """Tests that file-writing methods (to_csv, savefig, etc.) are blocked."""
+
+    def test_to_csv_blocked(self, sample_df):
+        code = "df.to_csv('test.csv')"
+        result = safe_execute(code, sample_df)
+        assert result.blocked
+        assert "to_csv" in result.blocked_reason
+
+    def test_savefig_blocked(self, sample_df):
+        code = "import matplotlib.pyplot as plt\nplt.plot([1, 2], [3, 4])\nplt.savefig('test.png')"
+        result = safe_execute(code, sample_df)
+        assert result.blocked
+        assert "savefig" in result.blocked_reason
+
+    def test_to_json_blocked(self, sample_df):
+        code = "df.to_json('test.json')"
+        result = safe_execute(code, sample_df)
+        assert result.blocked
+        assert "to_json" in result.blocked_reason
+        
+    def test_figure_savefig_blocked(self, sample_df):
+        code = "fig = plt.figure()\nfig.savefig('test.png')"
+        result = safe_execute(code, sample_df)
+        assert result.blocked
+        assert "savefig" in result.blocked_reason
+
+
 class TestSafeExecuteResults:
     """Verify safe_execute returns correct SandboxResult fields for common cases."""
 

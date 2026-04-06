@@ -58,6 +58,13 @@ BLOCKED_DUNDER_ATTRS = frozenset({
     "__loader__", "__spec__", "__qualname__",
 })
 
+# Methods that write to the filesystem (to prevent file leaks)
+BLOCKED_WRITE_ATTRIBUTES = frozenset({
+    "to_csv", "to_excel", "to_json", "to_sql", "to_parquet", 
+    "to_pickle", "to_feather", "to_stata", "to_latex", "to_html",
+    "to_markdown", "savefig", "save"
+})
+
 MAX_OUTPUT_BYTES = 50 * 1024  # 50 KB
 DEFAULT_TIMEOUT = 30  # seconds
 
@@ -135,6 +142,10 @@ class _SecurityVisitor(ast.NodeVisitor):
         if node.attr in BLOCKED_DUNDER_ATTRS:
             self.violations.append(
                 f"Access to restricted dunder attribute '.{node.attr}'"
+            )
+        if node.attr in BLOCKED_WRITE_ATTRIBUTES:
+            self.violations.append(
+                f"Call to restricted file-writing method '.{node.attr}()'"
             )
         self.generic_visit(node)
 

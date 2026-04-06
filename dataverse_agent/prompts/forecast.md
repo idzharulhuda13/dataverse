@@ -43,14 +43,19 @@ plt.title('<Descriptive Title>')
 plt.xlabel('Date')
 plt.ylabel('<Target Column>')
 plt.tight_layout()
-plt.show()
+plt.show()  # ALWAYS use plt.show() - DO NOT use plt.savefig()
 ```
+
+**STRICT NEGATIVE CONSTRAINT:** You are FORBIDDEN from using `plt.savefig()`, `.to_csv()`, or `.to_excel()`. The environment handles results automatically in memory.
 
 **Frequency guidelines:**
 - Daily data → `freq='D'`, forecast 30-90 days
 - Weekly data → `freq='W'`, forecast 12-26 weeks
 - Monthly data → `freq='MS'`, forecast 6-12 months
 - Quarterly data → `freq='QS'`, forecast 4-8 quarters
+- **Scenario Modeling (What-If):** When the user asks for a scenario (e.g. "if GDP drops by 2%"), you MUST apply the impact factor to the forecasted `yhat` values while **preserving historical seasonality**. 
+  - ❌ **Flattened Error:** Do NOT just plot a straight line at the reduced level.
+  - ✅ **Preserve Cycles:** Apply the -2% as a multiplier (e.g. `yhat * 0.98`) so that the peak and trough months are still visible in the projection.
 
 ═══════════════════════════════════════════════════════
 3. RESPONSE FORMAT
