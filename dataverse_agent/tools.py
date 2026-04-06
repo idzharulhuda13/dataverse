@@ -1,5 +1,7 @@
 import threading
 import pandas as pd
+import matplotlib
+matplotlib.use('Agg')  # Ensure thread-safe, non-interactive plotting
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import seaborn as sns
@@ -149,35 +151,35 @@ def _format_label(raw: str) -> str:
     
     return label
 
-def _human_format(val, pos=None):
-    """Format large numbers into human-readable strings.
-    e.g. 1500 → '1.5K', 2300000 → '2.3M', 1200000000 → '1.2B'
-    Strips unnecessary trailing .0 (e.g. 500.0K → 500K).
-    """
-    abs_val = abs(val)
-    sign = "-" if val < 0 else ""
-    if abs_val >= 1_000_000_000:
-        formatted = f"{abs_val / 1_000_000_000:.1f}"
-        return f"{sign}{formatted.rstrip('0').rstrip('.')}B"
-    elif abs_val >= 1_000_000:
-        formatted = f"{abs_val / 1_000_000:.1f}"
-        return f"{sign}{formatted.rstrip('0').rstrip('.')}M"
-    elif abs_val >= 1_000:
-        formatted = f"{abs_val / 1_000:.1f}"
-        return f"{sign}{formatted.rstrip('0').rstrip('.')}K"
-    elif abs_val == 0:
-        return "0"
-    elif abs_val < 100:
-        # Use significant digits for small indices/ratios to preserve decimals like 1.05
-        return f"{val:.3g}"
+def _get_human_formatter(max_val: float):
+    """Factory for a unit-consistent human-readable formatter (prevents K/M mixing)."""
+    abs_max = abs(max_val)
+    if abs_max >= 1_000_000_000:
+        unit, div = "B", 1_000_000_000
+    elif abs_max >= 1_000_000:
+        unit, div = "M", 1_000_000
+    elif abs_max >= 1_000:
+        unit, div = "K", 1_000
     else:
-        return f"{sign}{abs_val:.0f}"
+        unit, div = "", 1
+
+    def formatter(val, pos=None):
+        if val == 0: return "0"
+        sign = "-" if val < 0 else ""
+        scaled = abs(val) / div
+        if div == 1:
+            return f"{val:.3g}" if abs(val) < 100 else f"{sign}{abs(val):.0f}"
+        # Use more precision for small ranges to avoid duplicates
+        fmt = ".2f" if scaled < 10 else ".1f"
+        return f"{sign}{scaled:{fmt}}".rstrip('0').rstrip('.') + unit
+    
+    return mticker.FuncFormatter(formatter)
 
 def _percent_format(val, pos=None):
     """Format decimal values (0.0 to 1.0) as percentages (0% to 100%)."""
     return f"{val * 100:.1f}%".replace(".0%", "%")
 
-def create_visualization(chart_type: str, x_column: str, y_column: str = None, y2_column: str = None, hue: str = None, estimator: str = "mean", title: str = None, subtitle: str = None, sort_order: str = "ascending") -> str:
+def create_visualization(chart_type: str, x_column: str, y_column: str = None, y2_column: str = None, hue: str = None, size: str = None, estimator: str = "mean", title: str = None, subtitle: str = None, sort_order: str = "ascending", show_trend: bool = False, v_line: float = None, h_line: float = None) -> str:
     """Create a Seaborn or Matplotlib visualization from the dataset.
     
     Args:
@@ -186,10 +188,14 @@ def create_visualization(chart_type: str, x_column: str, y_column: str = None, y
         y_column: The name of the column for the Y-axis (optional for some charts).
         y2_column: The name of the column for the secondary Y-axis (optional, used for dual-axis line charts).
         hue: The name of the column to group by color (optional).
+        size: The name of the column to control marker size (used for Bubble Charts).
         estimator: Statistical function to use for aggregation ('mean', 'sum', 'count', 'min', 'max', 'std'). Defaults to 'mean'.
         title: The title of the chart (e.g. "Revenue by Region").
         subtitle: A descriptive label shown below the title (e.g. "Comparison of total units sold by model type").
         sort_order: How to sort categorical bars — 'ascending' (default), 'descending', or 'none' (dataset order).
+        show_trend: If True, adds a regression/trend line to scatter or line plots.
+        v_line: Optional X-value to draw a vertical reference line (useful for Quadrant Analysis).
+        h_line: Optional Y-value to draw a horizontal reference line (useful for Quadrant Analysis).
         
     Returns:
         A success message indicating the chart was created.
@@ -327,6 +333,17 @@ def create_visualization(chart_type: str, x_column: str, y_column: str = None, y
                 # Use scalar color to avoid palette without hue warnings
                 sns.lineplot(data=df, x=x_column, y=y_column, color=HIGHLIGHT, ax=ax, linewidth=2.5, marker="o", markersize=6, estimator=estimator, errorbar=error_config)
             
+            if show_trend:
+                if pd.api.types.is_numeric_dtype(df[x_column]):
+                    sns.regplot(data=df, x=x_column, y=y_column, scatter=False, ax=ax, color=ACCENT, line_kws={"linestyle": "--", "alpha": 0.6})
+                else:
+                    # For categorical X (like year_month), map to numeric indices for regression
+                    x_idx = sorted(df[x_column].unique())
+                    x_map = {val: i for i, val in enumerate(x_idx)}
+                    df_temp = df.copy()
+                    df_temp['x_idx_tmp'] = df_temp[x_column].map(x_map)
+                    sns.regplot(data=df_temp, x='x_idx_tmp', y=y_column, scatter=False, ax=ax, color=ACCENT, line_kws={"linestyle": "--", "alpha": 0.6})
+
             if y2_column:
                 ax.set_ylabel(_format_label(y_column), fontweight="bold", labelpad=10, color=HIGHLIGHT)
                 ax.tick_params(axis='y', colors=HIGHLIGHT)
@@ -336,7 +353,11 @@ def create_visualization(chart_type: str, x_column: str, y_column: str = None, y
                 ax2.tick_params(axis='y', colors=ACCENT)
                 ax2.yaxis.grid(False)
         elif chart_type == 'scatter':
-            sns.scatterplot(data=df, x=x_column, y=y_column, hue=plot_hue, palette=palette, ax=ax, s=70, alpha=0.8, edgecolor="white", linewidth=0.5, legend=use_legend)
+            scatter_size = size if size in df.columns else None
+            # Explicitly set legend='auto' to ensure Seaborn generates it even for size
+            sns.scatterplot(data=df, x=x_column, y=y_column, hue=plot_hue, size=scatter_size, sizes=(40, 400), palette=palette, ax=ax, alpha=0.8, edgecolor="white", linewidth=0.5, legend='auto' if use_legend else False)
+            if show_trend:
+                sns.regplot(data=df, x=x_column, y=y_column, scatter=False, ax=ax, color=ACCENT, line_kws={"alpha": 0.6})
         elif chart_type == 'hist':
             sns.histplot(data=df, x=x_column, hue=plot_hue, palette=palette, ax=ax, kde=True, edgecolor="white", linewidth=0.5, alpha=0.75, legend=use_legend)
         elif chart_type == 'box':
@@ -399,13 +420,13 @@ def create_visualization(chart_type: str, x_column: str, y_column: str = None, y
                     pivot_df = df.pivot_table(index=idx, columns=cols, values=vals, aggfunc=estimator)
                     # Auto-sort by the across-columns average to highlight the "Sweet Spot"
                     pivot_df = pivot_df.reindex(pivot_df.mean(axis=1).sort_values(ascending=sort_order != "descending").index)
-                    sns.heatmap(pivot_df, annot=True, fmt=".0f" if estimator == "sum" else ".1f", cmap="YlGnBu", ax=ax, linewidths=0.5, cbar_kws={"shrink": 0.8})
+                    sns.heatmap(pivot_df, annot=True, fmt=".0f" if estimator == "sum" else ".1f", cmap="YlGnBu", ax=ax, linewidths=0.5, cbar_kws={"shrink": 0.8, "label": _format_label(str(vals))})
                 else:
                     return f"Error: Heatmap requires an index (x_column), columns (hue/y_column), and a numeric metric (y_column). Found: x={idx}, cols={cols}, values={vals}."
             else:
                 # Default correlation heatmap
                 numeric_df = df.select_dtypes(include='number')
-                sns.heatmap(numeric_df.corr(), annot=True, fmt=".2f", cmap="RdYlBu_r", ax=ax, linewidths=0.5, square=True, cbar_kws={"shrink": 0.8})
+                sns.heatmap(numeric_df.corr(), annot=True, fmt=".2f", cmap="RdYlBu_r", ax=ax, linewidths=0.5, square=True, cbar_kws={"shrink": 0.8, "label": "Pearson Correlation Coefficient"})
         elif chart_type == 'pie':
             if y_column:
                 pie_data = df.groupby(x_column)[y_column].sum()
@@ -430,6 +451,12 @@ def create_visualization(chart_type: str, x_column: str, y_column: str = None, y
             ax.set_xlabel(_format_label(x_column), fontweight="medium", labelpad=10)
             ax.set_ylabel(_format_label(y_column) if y_column else "", fontweight="medium", labelpad=10)
             
+            # Draw reference lines (Quadrant Analysis)
+            if v_line is not None:
+                ax.axvline(v_line, color=ACCENT, linestyle="--", linewidth=1.5, alpha=0.8)
+            if h_line is not None:
+                ax.axhline(h_line, color=ACCENT, linestyle="--", linewidth=1.5, alpha=0.8)
+
             def _is_year_column(col_name: str) -> bool:
                 """Check if a numeric column likely contains year values."""
                 if col_name not in df.columns:
@@ -494,7 +521,8 @@ def create_visualization(chart_type: str, x_column: str, y_column: str = None, y
                 elif _is_percent_column(x_column):
                     ax.xaxis.set_major_formatter(mticker.FuncFormatter(_percent_format))
                 else:
-                    ax.xaxis.set_major_formatter(mticker.FuncFormatter(_human_format))
+                    max_x = df[x_column].max()
+                    ax.xaxis.set_major_formatter(_get_human_formatter(max_x))
             
             if y_column:
                 if pd.api.types.is_numeric_dtype(df[y_column]):
@@ -505,7 +533,8 @@ def create_visualization(chart_type: str, x_column: str, y_column: str = None, y
                     elif _is_percent_column(y_column):
                         ax.yaxis.set_major_formatter(mticker.FuncFormatter(_percent_format))
                     else:
-                        ax.yaxis.set_major_formatter(mticker.FuncFormatter(_human_format))
+                        max_y = df[y_column].max()
+                        ax.yaxis.set_major_formatter(_get_human_formatter(max_y))
             else:
                 # E.g. histograms where y-axis is the count/density
                 ax.yaxis.set_major_formatter(mticker.FuncFormatter(_human_format))
@@ -526,27 +555,47 @@ def create_visualization(chart_type: str, x_column: str, y_column: str = None, y
             max_label_len = max([len(t.get_text()) for t in ticks]) if ticks else 0
             if len(ticks) > 5 or max_label_len > 8:
                 plt.setp(ax.get_xticklabels(), rotation=35, ha="right", fontsize=9)
+        # ── Legend Styling (AFTER tight_layout) ──────────────────────────
+        if has_legend_data and use_legend:
+            fig.set_figwidth(14)  # Wider figure for side legend
+            try:
+                legend_title = ""
+                if hue and size and hue != size:
+                    legend_title = f"{_format_label(hue)}\n{_format_label(size)} (Size)"
+                elif hue:
+                    legend_title = _format_label(hue)
+                elif size:
+                    legend_title = f"Size: {_format_label(size)}"
+
+                # Create a figure-level legend to guarantee it's outside and never clipped
+                # Extract handles from the main axes
+                handles, labels = ax.get_legend_handles_labels()
+                if handles:
+                    fig.legend(handles, labels, loc='center left', bbox_to_anchor=(0.82, 0.5), title=legend_title, frameon=True, fontsize=9)
+                    # Remove the axis-level legend to avoid double-legend
+                    if ax.get_legend(): ax.get_legend().remove()
+            except:
+                pass
         
-        # ── Legend Styling ───────────────────────────────────────────────
-        if hue and chart_type not in ('heatmap', 'pie'):
-            legend = ax.get_legend()
-            if not legend and use_legend:
-                legend = ax.legend()
-                
-            if legend:
-                legend.set_title(_format_label(hue))
-                legend.get_frame().set_facecolor(BG_COLOR)
-                legend.get_frame().set_edgecolor(GRID_COLOR)
-                legend.get_frame().set_alpha(0.9)
+        # tight_layout first, then subplots_adjust to override it for the legend
+        fig.tight_layout(rect=[0, 0, 0.8, 0.95] if (has_legend_data and use_legend) else [0, 0, 1, 0.95])
         
-        # tight_layout FIRST, then position title/subtitle so they don't get overridden
-        fig.tight_layout()
+        if has_legend_data and use_legend:
+            # Further guarantee the right margin is open
+            fig.subplots_adjust(right=0.8)
+        
+        # Disable scientific notation multiplier (e.g. 1e6) on axes
+        if hasattr(ax.xaxis.get_major_formatter(), 'set_useOffset'):
+            ax.xaxis.get_major_formatter().set_useOffset(False)
+        if hasattr(ax.yaxis.get_major_formatter(), 'set_useOffset'):
+            ax.yaxis.get_major_formatter().set_useOffset(False)
         
         # ── Title + Subtitle Formatting (AFTER tight_layout) ─────────
         has_header = title or subtitle
         if has_header:
-            # Increase top margin to prevent title/subtitle overlap with plot
-            fig.subplots_adjust(top=0.85 if (title and subtitle) else 0.88)
+            # Adjust top margin if legend isn't already pushing a massive margin
+            top_margin = 0.85 if (title and subtitle) else 0.88
+            fig.subplots_adjust(top=top_margin)
             if title:
                 fig.suptitle(title, fontsize=17, fontweight="bold", color=TEXT_COLOR, y=0.98, ha="center")
             if subtitle:

@@ -17,7 +17,8 @@ visual_analyst_agent = Agent(
         'The primary data exploration agent. Analyzes data AND creates premium '
         'visualizations together in one response. Handles statistical analysis, '
         'pattern detection, correlations, comparisons, distributions, outliers, '
-        'and all chart types (bar, line, scatter, histogram, box, violin, heatmap, pie). '
+        'and all chart types (bar, line, scatter, histogram, box, violin, heatmap, pie, stacked_area, slope). '
+        'Supports advanced features like Bubble Charts (size), Trend Lines, and Quadrant Analysis (reference lines). '
         'Use this agent for ANY question about the data — it always shows a chart.'
     ),
     tools=[summary_tool, viz_tool, table_tool, fallback_tool],

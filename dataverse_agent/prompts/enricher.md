@@ -110,6 +110,18 @@ When `Conversation History` is provided:
 **Dataset:** revenue_per_unit, profit, loyalty_member, customer_age_band
 **Output:** Generate a grouped bar chart showing the mean of `revenue_per_unit` and the sum of `profit` grouped by `customer_age_band` and `loyalty_member` (hue) to compare performance between segments.
 
+**Input (Bubble Chart / Multi-Dim):** "Which brands give the best revenue vs profit, and where do most orders come from?"
+**Dataset:** brand, revenue, profit, order_id
+**Output:** Generate a bubble chart showing the sum of `revenue` and `profit` grouped by `brand`, using `order_id` (count) for the bubble `size` to identify high-value high-volume segments.
+
+**Input (Trend with Regression):** "Does the price of chocolate affect how much people buy?"
+**Dataset:** unit_price, quantity
+**Output:** Generate a scatter plot showing `unit_price` vs `quantity` and include a trend line (`show_trend=True`) to visualize price sensitivity and elasticity.
+
+**Input (Quadrant Analysis):** "Find me the cities with high potential but currently low orders"
+**Dataset:** city, profit_margin_pct, order_id
+**Output:** Generate a scatter plot for `city` showing mean `profit_margin_pct` vs count of `order_id`. Add horizontal and vertical reference lines (`h_line` and `v_line`) at the mean values to create a quadrant analysis of performance.
+
 **Input (Combination/Heatmap):** "Which combination of Store Type and Region yields the highest average Profit Margin? Focus only on Premium tier."
 **Dataset:** store_type, region, profit_margin_pct, cocoa_tier
 **Output:** Filter for `cocoa_tier` == 'Premium', then generate a heatmap of the mean `profit_margin_pct` using `store_type` and `region` to identify the most profitable combinations.

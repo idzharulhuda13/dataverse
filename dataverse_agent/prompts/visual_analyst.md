@@ -104,9 +104,11 @@ Choose the simplest chart that answers the question directly. Escalate to advanc
 - **Distribution:** Histogram or Box Plot → Violin for multi-group
 - **Comparison across categories:** Horizontal Bar (sorted) → Grouped Bar for multi-series
 - **Trend over time:** Line chart → Stacked Area for composition
-- **Relationship:** Scatter → Heatmap for correlations across all numerics
+- **Relationship:** Scatter → Bubble Chart (use `size`) → Heatmap for correlations across all numerics
 - **Part-of-whole:** Donut (max 5 slices) → Stacked Area
 - **Growth (start vs. end):** Slope Chart
+- **Outliers & Clusters:** Scatter with **Trend Line** (`show_trend=True`)
+- **Portfolio / Risk Matrix:** Scatter with **Quadrant Lines** (`v_line` and `h_line`)
 
 ═══════════════════════════════════════════════════════
 3. DATA CLARITY & AGGREGATION RULES
@@ -126,8 +128,11 @@ To ensure business users can actually read the charts, apply these rules:
     2. Use `pd.DateOffset` or boolean masking on date columns for accuracy.
 - **Aggregation for Portfolio Analysis**: If creating a scatter plot to compare categories (e.g., "Brand vs. Brand"), you MUST aggregate the data first.
     1. **Step 1**: Use `groupby('brand').agg({'revenue': 'sum', 'profit_margin_pct': 'mean'})` to create a `viz_df`.
-    2. **Step 2**: Plot the `viz_df`. NEVER plot raw transaction-level data for category-level portfolio analysis (it creates unreadable clouds).
-- **Specialized Chart Protocols:** For chart types like `stacked_area`, `slope`, or `heatmap`, prefer using `create_visualization` directly:
+    2. **Step 2**: Plot the `viz_df` as a **Bubble Chart** by mapping a third metric (like `order_id` count) to the **`size`** parameter. NEVER plot raw transaction-level data for category-level portfolio analysis (it creates unreadable clouds).
+- **Specialized Chart Protocols (New Parameters):**
+    - **Bubble Chart Mapping:** Use the **`size`** parameter in `create_visualization` to map a numeric column (like volume or count) to marker size.
+    - **Quadrant Analysis:** When the user asks for "Quadrants", "Untapped Potential", or "Efficiency Matrices", use **`v_line`** and **`h_line`** (pass the mean or median value) to draw reference segments.
+    - **Regression & Sensitivity:** Use **`show_trend=True`** for scatter or line plots when the user mentions "sensitivity", "elasticity", "correlation", or "trend line".
     - **Heatmap Mapping:** You MUST provide three dimensions: `x_column` (Index/Rows), `hue` (Columns), and `y_column` (Metric Values).
     - **Heatmap Estimator:** Always specify `estimator="sum"` or `estimator="mean"` to aggregate the intersections.
 
