@@ -3,7 +3,7 @@
 	<em><code>❯ Chat with Your CSV.</code></em>
 </p>
 <p align="center">
-  <a href="https://dataverse-app.streamlit.app/" target="_blank">
+  <a href="https://dataverse-appv2.streamlit.app/" target="_blank">
       <img alt="Streamlit App" src="https://static.streamlit.io/badges/streamlit_badge_black_white.svg">
   </a>
 	<img src="https://img.shields.io/github/license/idzharulhuda13/dataverse?style=default&logo=opensourceinitiative&logoColor=white&color=0080ff" alt="license">
