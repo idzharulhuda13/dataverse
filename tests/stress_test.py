@@ -29,7 +29,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 
 import pandas as pd
 from dotenv import load_dotenv
@@ -40,12 +40,41 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from models.utils import load_dataframe, extract_non_code_text
+from models.duckdb_connector import load_table
 from dataverse_agent.agent import root_agent
 from dataverse_agent.tools import set_session_context, get_session_figures, get_final_df, get_session_data_summary
 
 from google.adk.runners import Runner
 from google.adk.sessions.in_memory_session_service import InMemorySessionService
 from google.genai import types
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# CONFIGURATION
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@dataclass
+class StressTestConfig:
+    """Central configuration for the stress test suite."""
+    # Data & Paths
+    default_dataset: str = "dbt/dataverse/dataverse_warehouse.duckdb"
+    default_output_dir: str = "tests/stress_results"
+    duckdb_table_name: str = "mrt_sales"
+
+    # Optimization
+    skip_cleaning: bool = True  # Set to False if you want to run the cleaning agent by default
+
+    # API & Rate Limiting
+    inter_question_delay: int = 15  # seconds
+    max_retries: int = 3
+    retry_base_delay: int = 45  # seconds
+
+    # Model Settings
+    default_model: str = "gemini-3.1-flash-lite-preview"
+
+
+# Global configuration instance
+CONFIG = StressTestConfig()
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -61,52 +90,37 @@ class TestQuestion:
     checks: list[str] = field(default_factory=list)  # What to verify in the output
 
 
-# Default questions targeting the BMW Global Sales dataset
+# Default questions targeting the Chocolate Sales (mrt_sales) dataset
 STRESS_TEST_QUESTIONS: list[TestQuestion] = [
     TestQuestion(
         id="Q1",
-        question="2026 Outlook: Based on our current momentum, what do we expect our sales to look like next year? (Trend Forecast)",
+        question="Show me the monthly revenue trend for the last 6 months. Please highlight the month with the highest growth.",
         expected_chart_type="line",
-        checks=[
-            "chart_generated",
-            "dataset_intact",
-        ],
+        checks=["chart_generated", "dataset_intact", "min_points_2"],
     ),
     TestQuestion(
         id="Q2",
-        question="Electric Dominance: At what point (which year) will electric car revenue finally overtake traditional gas car revenue? (Crossover Chart)",
-        expected_chart_type="line",
-        checks=[
-            "chart_generated",
-            "dataset_intact",
-        ],
+        question="Compare the average transaction value (revenue per unit) and total profit between 'Loyalty Member' (True) and 'Non-Member' (False) customers across different 'Customer Age Band' segments.",
+        expected_chart_type="bar",
+        checks=["chart_generated", "dataset_intact"],
     ),
     TestQuestion(
         id="Q3",
-        question="Sensitivity Analysis: If the economy drops by 2% next year, what is the \"worst-case scenario\" for our revenue? (Scenario/Sensitivity Visualization)",
-        expected_chart_type="bar",
-        checks=[
-            "chart_generated",
-            "dataset_intact",
-        ],
+        question="Which combination of 'Store Type' and 'Region' yields the highest average 'Profit Margin %'? Focus specifically on the 'Premium' Cocoa Tier bars.",
+        expected_chart_type="heatmap",
+        checks=["chart_generated", "dataset_intact"],
     ),
     TestQuestion(
         id="Q4",
-        question="Market Maturity: Which markets are \"saturated\" (staying_flat) and which are \"emerging\" (growing fast)? (Growth-Share Matrix)",
-        expected_chart_type="scatter",
-        checks=[
-            "chart_generated",
-            "dataset_intact",
-        ],
+        question="Based on our current sales velocity, what is the revenue forecast for the next 4 weeks?",
+        expected_chart_type="line",
+        checks=["chart_generated", "dataset_intact"],
     ),
     TestQuestion(
         id="Q5",
-        question="Profitability Sweet Spot: Which combination of model and region gives us the best \"bang for our buck\" (highest revenue with lowest volatility)? (Heatmap)",
-        expected_chart_type="heatmap",
-        checks=[
-            "chart_generated",
-            "dataset_intact",
-        ],
+        question="Perform a Brand Portfolio Analysis: Plot our chocolate brands on a scatter chart where the X-axis is 'Total Revenue' and the Y-axis is 'Profit Margin %'. Label the quadrants to identify 'Stars' vs 'Low Performers'.",
+        expected_chart_type="scatter",
+        checks=["chart_generated", "dataset_intact", "max_points_1000"],
     ),
 ]
 
@@ -143,33 +157,36 @@ class TestResult:
 # RUNNER
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-# Default delay between questions (seconds) to avoid API rate limits
-DEFAULT_INTER_QUESTION_DELAY = 15
-
-# Retry configuration for rate-limited API calls
-MAX_RETRIES = 3
-RETRY_BASE_DELAY = 45  # seconds
-
-
 class StressTestRunner:
     """Runs stress test questions through the ADK agent pipeline."""
 
-    def __init__(self, dataset_path: str, output_dir: str, inter_question_delay: int = DEFAULT_INTER_QUESTION_DELAY):
+    def __init__(
+        self,
+        dataset_path: str,
+        output_dir: str,
+        inter_question_delay: int = CONFIG.inter_question_delay,
+        skip_cleaning: bool = False,
+    ):
         self.dataset_path = Path(dataset_path)
         self.output_dir = Path(output_dir)
         self.charts_dir = self.output_dir / "charts"
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.charts_dir.mkdir(parents=True, exist_ok=True)
+        self.skip_cleaning = skip_cleaning
 
         # Suppress verbose ADK framework logging
         logging.getLogger("google.adk").setLevel(logging.ERROR)
 
         # Load dataset
         print(f"📂 Loading dataset: {self.dataset_path}")
-        with open(self.dataset_path, "rb") as f:
-            self.original_df, error = load_dataframe(f)
-        if error:
-            raise RuntimeError(f"Failed to load dataset: {error}")
+        if self.dataset_path.suffix.lower() == ".duckdb":
+            print(f"   🗄️ DuckDB Warehouse detected. Loading '{CONFIG.duckdb_table_name}'...")
+            self.original_df = load_table(CONFIG.duckdb_table_name)
+        else:
+            with open(self.dataset_path, "rb") as f:
+                self.original_df, error = load_dataframe(f)
+            if error:
+                raise RuntimeError(f"Failed to load dataset: {error}")
         print(f"   ✅ Loaded: {len(self.original_df)} rows × {len(self.original_df.columns)} columns")
         print(f"   Columns: {list(self.original_df.columns)}")
 
@@ -191,7 +208,7 @@ class StressTestRunner:
 
     async def _send_to_agent(self, prompt: str) -> tuple[str, list[dict]]:
         """Send a prompt to the agent with retry-on-rate-limit."""
-        for attempt in range(MAX_RETRIES + 1):
+        for attempt in range(CONFIG.max_retries + 1):
             try:
                 final_text = ""
                 tool_calls = []
@@ -209,9 +226,9 @@ class StressTestRunner:
                                 tool_calls.append({"name": p.function_call.name, "args": args_dict})
                 return final_text, tool_calls
             except Exception as e:
-                if "429" in str(e) and attempt < MAX_RETRIES:
-                    delay = RETRY_BASE_DELAY * (attempt + 1)
-                    print(f"   ⏳ Rate limited. Retrying in {delay}s (attempt {attempt + 1}/{MAX_RETRIES})...")
+                if "429" in str(e) and attempt < CONFIG.max_retries:
+                    delay = CONFIG.retry_base_delay * (attempt + 1)
+                    print(f"   ⏳ Rate limited. Retrying in {delay}s (attempt {attempt + 1}/{CONFIG.max_retries})...")
                     await asyncio.sleep(delay)
                 else:
                     raise
@@ -239,7 +256,7 @@ class StressTestRunner:
             "CRITICAL: Do NOT suggest any recommendations, follow-up analyses, or next steps here. Focus purely on interpreting the visual evidence in front of you."
         )
 
-        for attempt in range(MAX_RETRIES + 1):
+        for attempt in range(CONFIG.max_retries + 1):
             try:
                 text = ""
                 async for event in self.runner.run_async(
@@ -256,8 +273,8 @@ class StressTestRunner:
                                 text += p.text
                 return extract_non_code_text(text)
             except Exception as e:
-                if "429" in str(e) and attempt < MAX_RETRIES:
-                    delay = RETRY_BASE_DELAY * (attempt + 1)
+                if "429" in str(e) and attempt < CONFIG.max_retries:
+                    delay = CONFIG.retry_base_delay * (attempt + 1)
                     print(f"   ⏳ Insight rate limited. Retrying in {delay}s...")
                     await asyncio.sleep(delay)
                 else:
@@ -340,6 +357,34 @@ class StressTestRunner:
 
             elif check == "month_axis_labels":
                 result.check_results[check] = "MANUAL_CHECK"
+
+            elif check == "min_points_2":
+                if figure:
+                    # Check if there are at least 2 data points (either in the label or lines)
+                    has_min_points = False
+                    for ax in figure.get_axes():
+                        for line in ax.get_lines():
+                            if len(line.get_xdata()) >= 2:
+                                has_min_points = True
+                                break
+                    result.check_results[check] = has_min_points
+                else:
+                    result.check_results[check] = "N/A (no figure)"
+
+            elif check == "max_points_1000":
+                if figure:
+                    has_too_many = False
+                    for ax in figure.get_axes():
+                        # Count collections (scatter plots usually use PathCollection)
+                        from matplotlib.collections import PathCollection
+                        for coll in ax.collections:
+                            if isinstance(coll, PathCollection):
+                                if len(coll.get_offsets()) > 1000:
+                                    has_too_many = True
+                                    break
+                    result.check_results[check] = not has_too_many
+                else:
+                    result.check_results[check] = "N/A (no figure)"
 
             else:
                 result.check_results[check] = "UNKNOWN_CHECK"
@@ -460,34 +505,37 @@ class StressTestRunner:
         print(f"🚀 DataVerse Stress Test — {len(questions)} questions")
         print(f"   Dataset: {self.dataset_path}")
         print(f"   Output:  {self.output_dir}")
-        print(f"   Model:   {os.getenv('GEMINI_MODEL', 'gemini-3.1-flash-lite-preview')}")
+        print(f"   Model:   {os.getenv('GEMINI_MODEL', CONFIG.default_model)}")
         print(f"   Time:    {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         print(f"{'━'*70}")
 
         # Initial Cleaning Phase (to mirror Streamlit behavior)
-        print(f"\n   🧹 Running Initial Cleaning Phase...")
-        cleaning_prompt = (
-            "[INITIAL-CLEANING]\n\n"
-            "[System Context]: The user just uploaded a new dataset. "
-            "Analyze the dataset for missing values, duplicate rows, and incorrect data types. "
-            "Apply necessary corrections (e.g., filling nulls with median, dropping duplicates) "
-            "and SAVE the cleaned result to `final_df` so it persists for the user. "
-            "Report a concise summary of what was cleaned."
-        )
-        set_session_context(self.working_df)
-        try:
-            cleaning_response, _ = await self._send_to_agent(cleaning_prompt)
-            final_df = get_final_df()
-            if final_df is not None:
-                self.working_df = final_df
-                # The baseline original_df should also reflect the cleaned version
-                self.original_df = final_df.copy()
-                print(f"   ✨ Cleaning complete. New shape: {self.working_df.shape[0]} rows × {self.working_df.shape[1]} cols")
-                print(f"   Agent summary: {extract_non_code_text(cleaning_response).strip()[:200]}...")
-            else:
-                print("   ⚠️ Cleaning phase returned no new DataFrame.")
-        except Exception as e:
-            print(f"   ❌ Errror during Initial Cleaning Phase: {e}")
+        if not self.skip_cleaning:
+            print(f"\n   🧹 Running Initial Cleaning Phase...")
+            cleaning_prompt = (
+                "[INITIAL-CLEANING]\n\n"
+                "[System Context]: The user just uploaded a new dataset. "
+                "Analyze the dataset for missing values, duplicate rows, and incorrect data types. "
+                "Apply necessary corrections (e.g., filling nulls with median, dropping duplicates) "
+                "and SAVE the cleaned result to `final_df` so it persists for the user. "
+                "Report a concise summary of what was cleaned."
+            )
+            set_session_context(self.working_df)
+            try:
+                cleaning_response, _ = await self._send_to_agent(cleaning_prompt)
+                final_df = get_final_df()
+                if final_df is not None:
+                    self.working_df = final_df
+                    # The baseline original_df should also reflect the cleaned version
+                    self.original_df = final_df.copy()
+                    print(f"   ✨ Cleaning complete. New shape: {self.working_df.shape[0]} rows × {self.working_df.shape[1]} cols")
+                    print(f"   Agent summary: {extract_non_code_text(cleaning_response).strip()[:200]}...")
+                else:
+                    print("   ⚠️ Cleaning phase returned no new DataFrame.")
+            except Exception as e:
+                print(f"   ❌ Errror during Initial Cleaning Phase: {e}")
+        else:
+            print(f"\n   ⏩ Skipping Initial Cleaning Phase (data source is already clean).")
 
         for i, q in enumerate(questions):
             # Inter-question delay to avoid rate limiting (skip before first question)
@@ -517,7 +565,7 @@ class StressTestRunner:
             "",
             f"> **Date:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
             f"> **Dataset:** `{self.dataset_path.name}` ({len(self.original_df)} rows × {len(self.original_df.columns)} cols)",
-            f"> **Model:** `{os.getenv('GEMINI_MODEL', 'gemini-3.1-flash-lite-preview')}`",
+            f"> **Model:** `{os.getenv('GEMINI_MODEL', CONFIG.default_model)}`",
             "",
             "---",
             "",
@@ -693,13 +741,19 @@ def main():
     parser = argparse.ArgumentParser(description="DataVerse Agent Stress Test")
     parser.add_argument(
         "--dataset",
-        default="data/bmw_global_sales_2018_2025.csv",
-        help="Path to the CSV dataset (default: data/bmw_global_sales_2018_2025.csv)",
+        default=CONFIG.default_dataset,
+        help=f"Path to the dataset (CSV or DuckDB) (default: {CONFIG.default_dataset})",
+    )
+    parser.add_argument(
+        "--cleaning",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Whether to run the initial cleaning phase. Defaults to False for DuckDB, True for CSV.",
     )
     parser.add_argument(
         "--output-dir",
-        default="tests/stress_results",
-        help="Directory to save results (default: tests/stress_results)",
+        default=CONFIG.default_output_dir,
+        help=f"Directory to save results (default: {CONFIG.default_output_dir})",
     )
     parser.add_argument(
         "--questions",
@@ -710,8 +764,8 @@ def main():
     parser.add_argument(
         "--delay",
         type=int,
-        default=DEFAULT_INTER_QUESTION_DELAY,
-        help=f"Seconds to wait between questions to avoid rate limits (default: {DEFAULT_INTER_QUESTION_DELAY})",
+        default=CONFIG.inter_question_delay,
+        help=f"Seconds to wait between questions (default: {CONFIG.inter_question_delay})",
     )
     args = parser.parse_args()
 
@@ -743,11 +797,15 @@ def main():
             print(f"   Available: {[q.id for q in STRESS_TEST_QUESTIONS]}")
             sys.exit(1)
 
+    # Use config default unless overridden via CLI
+    skip_cleaning = not args.cleaning if args.cleaning is not None else CONFIG.skip_cleaning
+
     # Run
     runner = StressTestRunner(
         dataset_path=args.dataset,
         output_dir=args.output_dir,
         inter_question_delay=args.delay,
+        skip_cleaning=skip_cleaning,
     )
     asyncio.run(runner.run_all(questions))
 

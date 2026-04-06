@@ -198,6 +198,20 @@ def create_visualization(chart_type: str, x_column: str, y_column: str = None, y
     if df is None:
         return "Error: No dataset loaded."
 
+    # ── Aggregation Guard ───────────────────────────────────────────────
+    # If the user tries to plot >10k rows without prior aggregation,
+    # we automatically sample to 5k for scatter plots to preserve UI responsiveness.
+    if len(df) > 10_000:
+        if chart_type == 'scatter':
+            df = df.sample(n=5_000, random_state=42)
+            print(f"⚠️ AGGREGATION GUARD: Dataset too large ({len(_get_df())} rows). Scatter plot sampled to 5,000 points for readability.")
+        elif chart_type == 'line' and not hue:
+            # For lines, Seaborn aggregates by mean by default, but a 10k+ row line
+            # can still be incredibly slow and noisy if X has high cardinality.
+            if df[x_column].nunique() > 1000:
+                df = df.sample(n=5_000, random_state=42).sort_values(x_column)
+                print(f"⚠️ AGGREGATION GUARD: Line chart input too large and high-cardinality. Sampled to 5,000 points.")
+
     # ── Elegant DataVerse Branding ───────────────────────────────────────
     # Primary Palette: Deep Navy and Warm Gold with slate accents
     PALETTE = ["#2D3A4A", "#D4A574", "#4A7C8F", "#7BA7A9", "#B8D4D2", "#C4786C", "#8B6F8E", "#A3B5C7"]

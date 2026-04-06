@@ -122,6 +122,11 @@ To ensure business users can actually read the charts, apply these rules:
     1. Use `viz_df = df.sample(n=500)` or aggregate the data into bins first.
     2. Over-plotted charts are considered a failure.
 - **Dynamic Time Filtering:** If the enriched query specifies a relative time constraint (e.g., "last 3 years"), you MUST use `execute_python_code_fallback` to dynamically filter the `df` using Pandas (e.g., `df[df['Year'] >= df['Year'].max() - 2]`) BEFORE parsing it into a visualization.
+    1. **STRICT CONSTRAINT**: NEVER use `.tail()` or `.head()` for temporal analysis; positional slicing ignores the actual time values and leads to 1-point trend lines.
+    2. Use `pd.DateOffset` or boolean masking on date columns for accuracy.
+- **Aggregation for Portfolio Analysis**: If creating a scatter plot to compare categories (e.g., "Brand vs. Brand"), you MUST aggregate the data first.
+    1. **Step 1**: Use `groupby('brand').agg({'revenue': 'sum', 'profit_margin_pct': 'mean'})` to create a `viz_df`.
+    2. **Step 2**: Plot the `viz_df`. NEVER plot raw transaction-level data for category-level portfolio analysis (it creates unreadable clouds).
 - **Specialized Chart Protocols:** For chart types like `stacked_area`, `slope`, or `heatmap`, prefer using `create_visualization` directly:
     - **Heatmap Mapping:** You MUST provide three dimensions: `x_column` (Index/Rows), `hue` (Columns), and `y_column` (Metric Values).
     - **Heatmap Estimator:** Always specify `estimator="sum"` or `estimator="mean"` to aggregate the intersections.

@@ -32,6 +32,17 @@ For analysis/visualization requests:
 - Map "volatility", "risk", or "fluctuation" to the **standard deviation** aggregation method.
 - Explicitly specify the **aggregation method** (sum, mean, median, count, std) and **filters** (e.g., "Top 10", "Only for 2023").
 ═══════════════════════════════════════════════════════
+4. TEMPORAL FILTERING & CHRONOLOGY
+Base filtering on relative time (e.g., "last 6 months") rather than row-based slicing (e.g., `.tail()`).
+- Always specify a dynamic date-based filter: `df[df['date_col'] >= df['date_col'].max() - pd.DateOffset(months=6)]`.
+- For trend requests, ensure the rewritten query specifies **aggregation by time period** (e.g., "Grouped by year_month").
+
+═══════════════════════════════════════════════════════
+5. COMPARATIVE VISUALIZATION BIAS
+If the user asks to "Compare", "Identify the highest/lowest", or analyze "Combinations", default to a **Visualization** (bar, heatmap, scatter) rather than a Table.
+- Use `create_visualization` for all comparative analytical goals.
+- Use `create_table` ONLY if the user explicitly asks for "raw numbers", "a table", or "a list".
+═══════════════════════════════════════════════════════
 6. CONVERSATION CONTEXT (Memory)
 ═══════════════════════════════════════════════════════
 
@@ -90,3 +101,15 @@ When `Conversation History` is provided:
 **Input (Tabular Pivot):** "Give me a pivot table of sales by region and category"
 **Dataset:** Region, Category, Sales, Units
 **Output:** Generate a pivot table of total `Sales` using `Region` as the index and `Category` as the columns to summarize performance across segments.
+
+**Input (Trend with Highlight):** "Show me the monthly revenue trend for the last 6 months. Please highlight the month with the highest growth."
+**Dataset:** order_date, revenue
+**Output:** Generate a line chart showing the total `revenue` grouped by `order_date` (resampled to monthly frequency) for the last 6 months to visualize temporal growth patterns.
+
+**Input (Comparative Multi-Metric):** "Compare the average transaction value and total profit between loyalty members and non-members across age segments."
+**Dataset:** revenue_per_unit, profit, loyalty_member, customer_age_band
+**Output:** Generate a grouped bar chart showing the mean of `revenue_per_unit` and the sum of `profit` grouped by `customer_age_band` and `loyalty_member` (hue) to compare performance between segments.
+
+**Input (Combination/Heatmap):** "Which combination of Store Type and Region yields the highest average Profit Margin? Focus only on Premium tier."
+**Dataset:** store_type, region, profit_margin_pct, cocoa_tier
+**Output:** Filter for `cocoa_tier` == 'Premium', then generate a heatmap of the mean `profit_margin_pct` using `store_type` and `region` to identify the most profitable combinations.
