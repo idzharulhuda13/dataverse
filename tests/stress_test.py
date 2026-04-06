@@ -94,33 +94,33 @@ class TestQuestion:
 STRESS_TEST_QUESTIONS: list[TestQuestion] = [
     TestQuestion(
         id="Q1",
-        question="Show me the monthly revenue trend for the last 6 months. Please highlight the month with the highest growth.",
-        expected_chart_type="line",
-        checks=["chart_generated", "dataset_intact", "min_points_2"],
+        question="Bubble Analysis: Compare brands by total revenue (x) and total profit (y), using the number of orders (count) as the bubble size.",
+        expected_chart_type="scatter",
+        checks=["chart_generated", "dataset_intact"],
     ),
     TestQuestion(
         id="Q2",
-        question="Compare the average transaction value (revenue per unit) and total profit between 'Loyalty Member' (True) and 'Non-Member' (False) customers across different 'Customer Age Band' segments.",
-        expected_chart_type="bar",
+        question="Sensitivity Analysis: Show a scatter plot of unit_price vs quantity and include a regression trend line to visualize price elasticity.",
+        expected_chart_type="scatter",
         checks=["chart_generated", "dataset_intact"],
     ),
     TestQuestion(
         id="Q3",
-        question="Which combination of 'Store Type' and 'Region' yields the highest average 'Profit Margin %'? Focus specifically on the 'Premium' Cocoa Tier bars.",
-        expected_chart_type="heatmap",
+        question="Efficiency Matrix: Generate a quadrant analysis of cities comparing 'mean profit margin' vs 'total orders'. Add dashed reference lines at the mean for both axes.",
+        expected_chart_type="scatter",
         checks=["chart_generated", "dataset_intact"],
     ),
     TestQuestion(
         id="Q4",
-        question="Based on our current sales velocity, what is the revenue forecast for the next 4 weeks?",
+        question="Growth Trajectory: Show the monthly revenue trend for the last 6 months and include a trend line to identify the overall growth direction.",
         expected_chart_type="line",
         checks=["chart_generated", "dataset_intact"],
     ),
     TestQuestion(
         id="Q5",
-        question="Perform a Brand Portfolio Analysis: Plot our chocolate brands on a scatter chart where the X-axis is 'Total Revenue' and the Y-axis is 'Profit Margin %'. Label the quadrants to identify 'Stars' vs 'Low Performers'.",
+        question="Store Portfolio: Compare Store Types across Regions using a scatter plot of total revenue vs profit, with the mean profit margin mapped to bubble size.",
         expected_chart_type="scatter",
-        checks=["chart_generated", "dataset_intact", "max_points_1000"],
+        checks=["chart_generated", "dataset_intact"],
     ),
 ]
 
