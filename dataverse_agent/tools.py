@@ -151,29 +151,44 @@ def _format_label(raw: str) -> str:
     
     return label
 
-def _get_human_formatter(max_val: float):
-    """Factory for a unit-consistent human-readable formatter (prevents K/M mixing)."""
-    abs_max = abs(max_val)
-    if abs_max >= 1_000_000_000:
+def _human_format(val: float, fixed_max: float = None) -> str:
+    """Core logic to format numbers into a human-readable string (K, M, B).
+    
+    - If fixed_max is provided: uses a consistent unit based on that maximum (good for axes).
+    - If fixed_max is None: scales each value independently to its best fit (good for labels).
+    """
+    if val is None:
+        return ""
+    if val == 0:
+        return "0"
+        
+    abs_val = abs(val)
+    # Determine unit scale based on the provided max or the individual value
+    target_max = abs(fixed_max) if fixed_max is not None else abs_val
+    
+    if target_max >= 1_000_000_000:
         unit, div = "B", 1_000_000_000
-    elif abs_max >= 1_000_000:
+    elif target_max >= 1_000_000:
         unit, div = "M", 1_000_000
-    elif abs_max >= 1_000:
+    elif target_max >= 1_000:
         unit, div = "K", 1_000
     else:
         unit, div = "", 1
 
-    def formatter(val, pos=None):
-        if val == 0: return "0"
-        sign = "-" if val < 0 else ""
-        scaled = abs(val) / div
-        if div == 1:
-            return f"{val:.3g}" if abs(val) < 100 else f"{sign}{abs(val):.0f}"
-        # Use more precision for small ranges to avoid duplicates
-        fmt = ".2f" if scaled < 10 else ".1f"
-        return f"{sign}{scaled:{fmt}}".rstrip('0').rstrip('.') + unit
+    sign = "-" if val < 0 else ""
+    scaled = abs_val / div
     
-    return mticker.FuncFormatter(formatter)
+    if div == 1:
+        return f"{val:.3g}" if abs_val < 100 else f"{sign}{abs_val:.0f}"
+    
+    # Use more precision for small ranges (e.g. 1.25M vs 125M) to avoid duplicates
+    fmt = ".2f" if scaled < 10 else ".1f"
+    clean_val = f"{scaled:{fmt}}".rstrip('0').rstrip('.')
+    return f"{sign}{clean_val}{unit}"
+
+def _get_human_formatter(max_val: float = None):
+    """Factory for a Matplotlib formatter using the unified human_format logic."""
+    return mticker.FuncFormatter(lambda v, p: _human_format(v, fixed_max=max_val))
 
 def _percent_format(val, pos=None):
     """Format decimal values (0.0 to 1.0) as percentages (0% to 100%)."""
@@ -252,7 +267,8 @@ def create_visualization(chart_type: str, x_column: str, y_column: str = None, y
     
     try:
         # Prevent Seaborn warning: "Passing palette without assigning hue is deprecated"
-        use_legend = True if hue else False
+        # Show legend if hue is provided, or for bubble charts (size provided in scatter)
+        use_legend = bool(hue) or (chart_type == 'scatter' and bool(size))
         plot_hue = hue
         ax2 = None
         
@@ -537,7 +553,7 @@ def create_visualization(chart_type: str, x_column: str, y_column: str = None, y
                         ax.yaxis.set_major_formatter(_get_human_formatter(max_y))
             else:
                 # E.g. histograms where y-axis is the count/density
-                ax.yaxis.set_major_formatter(mticker.FuncFormatter(_human_format))
+                ax.yaxis.set_major_formatter(_get_human_formatter())
                 
             if ax2 is not None and y2_column:
                 if pd.api.types.is_numeric_dtype(df[y2_column]):
@@ -548,14 +564,18 @@ def create_visualization(chart_type: str, x_column: str, y_column: str = None, y
                     elif _is_percent_column(y2_column):
                         ax2.yaxis.set_major_formatter(mticker.FuncFormatter(_percent_format))
                     else:
-                        ax2.yaxis.set_major_formatter(mticker.FuncFormatter(_human_format))
+                        ax2.yaxis.set_major_formatter(_get_human_formatter())
                         
             # Auto-rotate x labels if they are long or numerous
             ticks = ax.get_xticklabels()
             max_label_len = max([len(t.get_text()) for t in ticks]) if ticks else 0
             if len(ticks) > 5 or max_label_len > 8:
                 plt.setp(ax.get_xticklabels(), rotation=35, ha="right", fontsize=9)
-        # ── Legend Styling (AFTER tight_layout) ──────────────────────────
+
+        # ── Legend Styling (AFTER axes are finalized) ────────────────────
+        # Check if any legend handles were actually created by the plot calls
+        handles, labels = ax.get_legend_handles_labels()
+        has_legend_data = len(handles) > 0
         if has_legend_data and use_legend:
             fig.set_figwidth(14)  # Wider figure for side legend
             try:

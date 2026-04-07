@@ -118,9 +118,9 @@ STRESS_TEST_QUESTIONS: list[TestQuestion] = [
     ),
     TestQuestion(
         id="Q5",
-        question="Store Portfolio: Compare Store Types across Regions using a scatter plot of total revenue vs profit, with the mean profit margin mapped to bubble size.",
-        expected_chart_type="scatter",
-        checks=["chart_generated", "dataset_intact"],
+        question="Brand Leaderboard: Show a bar chart of the top 10 brands by total revenue. Use 'sum' as the estimator.",
+        expected_chart_type="bar",
+        checks=["chart_generated", "dataset_intact", "bar_labels_valid"],
     ),
 ]
 
