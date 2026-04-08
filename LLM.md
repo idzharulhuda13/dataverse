@@ -1,6 +1,6 @@
 # LLM.md — DataVerse Project Context
 
-> **Last updated:** 2026-04-05
+> **Last updated:** 2026-04-09
 > This file gives LLM coding assistants instant context about the DataVerse project so they can be productive without scanning the entire codebase.
 
 ---
@@ -20,7 +20,7 @@ DataVerse is an **AI-powered, conversational data analysis and visualization too
 | **Frontend / UI** | Streamlit (wide layout, `st.chat_message`, `st.pyplot`) |
 | **Agent Framework** | Google ADK (`google.adk`) — `Runner`, `Agent`, `FunctionTool` |
 | **LLM** | Google Gemini (model from `GEMINI_MODEL` env var, default: `gemini-3.1-flash-lite-preview`) |
-| **Data** | Pandas DataFrames (CSV, Excel, Parquet, JSON, TSV) |
+| **Data** | Pandas DataFrames, Pydantic Models (validation) |
 | **Warehouse** | DuckDB + dbt (`dbt/dataverse/dataverse_warehouse.duckdb`) |
 | **Visualization** | Seaborn + Matplotlib |
 | **Forecasting** | Facebook Prophet |
@@ -31,7 +31,7 @@ DataVerse is an **AI-powered, conversational data analysis and visualization too
 ```
 google-adk>=1.27.2, google-genai>=1.68.0, gpt4all>=2.8.2, dbt-duckdb>=1.10.1,
 matplotlib>=3.10.8, openpyxl>=3.1.0, pandas>=2.3.3, prophet>=1.3.0,
-python-dotenv>=1.2.2, seaborn>=0.13.2, streamlit>=1.55.0
+python-dotenv>=1.2.2, seaborn>=0.13.2, streamlit>=1.55.0, pydantic>=2.0
 ```
 Dev: `pytest>=9.0.2`
 
@@ -51,9 +51,11 @@ DataVerse/
 ├── dataverse_agent/               ← Agent package
 │   ├── __init__.py                ← Imports agent.py
 │   ├── agent.py                   ← Re-exports root_agent from agents/
+│   ├── schemas.py                 ← Centralized Pydantic data models for types & validation
+│   ├── errors.py                  ← Error mitigation registry & user guidance logic
 │   ├── tools.py                   ← ADK FunctionTools (create_visualization, get_data_summary, create_table, execute_python_code_fallback)
 │   ├── messages.py                ← Centralized chat messages (intro, no-csv, session-resume, upload-landing, analyzing)
-│   ├── usage.py                   ← SessionUsage dataclass: token tracking, turn counting, cost estimation, activity trace
+│   ├── usage.py                   ← Re-exports SessionUsage and TraceEvent from schemas.py
 │   ├── commands.py                ← Slash command parser & handler (/summary, /export, /undo, /pin, /clear, /cost, /help)
 │   ├── agents/                    ← Multi-agent definitions
 │   │   ├── __init__.py            ← Exports orchestrator as root_agent
@@ -246,16 +248,26 @@ Randomized message pools:
 - `UPLOAD_LANDING_MESSAGES` — Hero uploader text
 - `ANALYZING_DATA_MESSAGES` — Spinner text during auto-analysis
 
-### `dataverse_agent/usage.py` — Session Usage Tracking
+### `dataverse_agent/usage.py` — Usage Tracking Facade
 
-- **`TraceEvent`** dataclass: `timestamp`, `event_type` (start/tool_call/vision_start/vision_complete/complete), `agent_name`, `detail`, `metadata` (tool args, code)
-- **`SessionUsage`** dataclass: tracks `api_calls`, `turns`, `input_tokens`, `output_tokens`, `image_tokens`, and `trace: list[TraceEvent]`
-  - `.total_tokens` property — sum of all token types
-  - `.estimated_cost_usd` property — rough cost using Gemini Flash pricing ($0.075/1M input, $0.30/1M output)
-  - `.record_api_call(usage_metadata)` — increments token counters from ADK event metadata
-  - `.record_turn()` — increments conversation turn counter
-  - `.record_trace(event_type, agent_name, detail, metadata)` — appends a TraceEvent
-  - `.clear_trace()` — resets trace list at start of new request
+- Re-exports `SessionUsage`, `TraceEvent`, and `UsageMetadata` from `schemas.py`.
+- Maintained for backward compatibility and as a clean import point for usage-related logic.
+
+### `dataverse_agent/schemas.py` — Centralized Pydantic models
+
+All shared data structures are defined here to ensure type safety and consistent validation:
+- **`UsageMetadata`**: Tracks tokens from a single API call.
+- **`TraceEvent`**: Represents a single thought, tool call, or event in the agent's workflow.
+- **`SessionUsage`**: Aggregates tokens, turns, and cost for a chat session. Includes `.record_api_call()` and `.record_trace()` logic.
+- **`SandboxResult`**: Standardized return type for the Python sandbox.
+- **`DataLoadResult`**: Standardized return type for multi-format data loading.
+- **`SlashCommandResult`**: Standardized return type for slash command execution.
+- **`InfographicContent`**: Structured JSON model for agent-generated infographic narratives.
+
+### `dataverse_agent/errors.py` — Error Mitigation
+
+- **`MitigationManager`**: A central registry that maps technical Python exceptions (KeyError, ValueError, etc.) to user-friendly "friendly messages" and "suggested actions".
+- **`error_guardrail` decorator**: Wraps tool functions to automatically trap errors, log them technically for admins, and return structured JSON guidance for the UI/Agent.
 
 ### `dataverse_agent/infographic.py` — Agent-driven Infographic
 
@@ -353,6 +365,8 @@ Outputs a Markdown report to `tests/stress_results/stress_test_report.md`. Accep
 10. **Admin auth gate** — `st.session_state.is_logged_in` (verified against `st.secrets.ADMIN_USERNAME/ADMIN_PASSWORD`) gates access to Observability and Usage/Budget panels. Guest users always see a simplified turn countdown.
 11. **Display tables** — `create_table` tool and `display_df` variable in sandbox produce interactive `st.dataframe()` widgets in chat, separate from the persistent session dataset. Tool calls collapse raw execution logs when a table or figure is present.
 12. **Enricher chat context** — `enrich_query()` accepts `chat_history` (last 5 messages) to resolve pronouns and follow-up questions relative to previous turns. Returns `(enriched_str, usage_dict)` tuple.
+13. **Pydantic Data Models** — Centralized Pydantic schemas in `schemas.py` provide strict type checking, automatic validation, and easy serialization for complex data flows between the agent, sandbox, and Streamlit UI.
+14. **Unified Error Mitigation** — Errors are not just caught; they are translated via `MitigationManager` into human-guidance models that offer specific next steps, reducing user frustration during data edge cases.
 
 ---
 

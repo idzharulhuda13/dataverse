@@ -82,6 +82,8 @@ Any attempt to bypass these restrictions results in a `🛡️ Code blocked` ale
     ├── dataverse_agent/
     │   ├── __init__.py
     │   ├── agent.py             ← Main entry point for the Multi-Agent Orchestrator
+    │   ├── schemas.py           ← Centralized Pydantic models for type safety
+    │   ├── errors.py            ← Error mitigation and user guidance logic
     │   ├── agents/              ← Specialized sub-agents (Cleaning, Forecast, Visual Analyst, Enricher)
     │   ├── prompts/             ← Specific instruction prompts for each agent
     │   ├── messages.py          ← Centralized chat messages (intro, no-csv, session-resume)
