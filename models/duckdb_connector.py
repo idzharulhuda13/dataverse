@@ -9,69 +9,76 @@ from pathlib import Path
 import duckdb
 import pandas as pd
 
+from dataverse_agent.schemas import TableRegistryEntry
+
 # ── Warehouse location ─────────────────────────────────────────────────────────
 _PROJECT_ROOT = Path(__file__).parent.parent
 WAREHOUSE_PATH = _PROJECT_ROOT / "dbt" / "dataverse" / "dataverse_warehouse.duckdb"
 
 # ── Table Registry ─────────────────────────────────────────────────────────────
 # Manually maintained for now. Future: auto-scan from dbt manifest.json
-TABLE_REGISTRY: dict[str, dict] = {
-    "mrt_sales": {
-        "display_name": "Chocolate Sales — Transactions",
-        "description": "Full order-level transactions with customer, product, store, and time dimensions pre-joined.",
-        "schema": "main_chocolate_sales_mrt",
-        "icon": "🛒",
-        "grain": "One row per order",
-        "approx_rows": "250,000",
-        "columns": 44,
-        "tags": ["sales", "transactions", "OBT"],
-    },
-    "mrt_customer_summary": {
-        "display_name": "Customer Summary",
-        "description": "Lifetime value and purchase behaviour aggregated per customer. Segmented by age, gender, and loyalty.",
-        "schema": "main_chocolate_sales_mrt",
-        "icon": "👤",
-        "grain": "One row per customer",
-        "approx_rows": "50,000",
-        "columns": 21,
-        "tags": ["customers", "LTV", "segmentation"],
-    },
-    "mrt_product_performance": {
-        "display_name": "Product Performance",
-        "description": "Sales KPIs per product SKU — revenue, margin, discount rate, and unique customer reach.",
-        "schema": "main_chocolate_sales_mrt",
-        "icon": "🍫",
-        "grain": "One row per product",
-        "approx_rows": "202",
-        "columns": 20,
-        "tags": ["products", "SKU", "margin"],
-    },
-    "mrt_store_performance": {
-        "display_name": "Store Performance",
-        "description": "Regional and store-level KPIs — revenue, profit margin, loyalty penetration, and customer counts.",
-        "schema": "main_chocolate_sales_mrt",
-        "icon": "🏪",
-        "grain": "One row per store",
-        "approx_rows": "100",
-        "columns": 20,
-        "tags": ["stores", "regional", "retail"],
-    },
-    "mrt_daily_sales": {
-        "display_name": "Daily Sales Trend",
-        "description": "Time-series at daily grain. Ideal for high-density trend analysis and forecasting.",
-        "schema": "main_chocolate_sales_mrt",
-        "icon": "📈",
-        "grain": "One row per calendar day",
-        "approx_rows": "185",
-        "columns": 20,
-        "tags": ["time-series", "trends", "forecasting"],
-    },
+TABLE_REGISTRY: dict[str, TableRegistryEntry] = {
+    "mrt_sales": TableRegistryEntry(
+        table_id="mrt_sales",
+        display_name="Chocolate Sales — Transactions",
+        description="Full order-level transactions with customer, product, store, and time dimensions pre-joined.",
+        db_schema="main_chocolate_sales_mrt",
+        icon="🛒",
+        grain="One row per order",
+        approx_rows="250,000",
+        columns=44,
+        tags=["sales", "transactions", "OBT"],
+    ),
+    "mrt_customer_summary": TableRegistryEntry(
+        table_id="mrt_customer_summary",
+        display_name="Customer Summary",
+        description="Lifetime value and purchase behaviour aggregated per customer. Segmented by age, gender, and loyalty.",
+        db_schema="main_chocolate_sales_mrt",
+        icon="👤",
+        grain="One row per customer",
+        approx_rows="50,000",
+        columns=21,
+        tags=["customers", "LTV", "segmentation"],
+    ),
+    "mrt_product_performance": TableRegistryEntry(
+        table_id="mrt_product_performance",
+        display_name="Product Performance",
+        description="Sales KPIs per product SKU — revenue, margin, discount rate, and unique customer reach.",
+        db_schema="main_chocolate_sales_mrt",
+        icon="🍫",
+        grain="One row per product",
+        approx_rows="202",
+        columns=20,
+        tags=["products", "SKU", "margin"],
+    ),
+    "mrt_store_performance": TableRegistryEntry(
+        table_id="mrt_store_performance",
+        display_name="Store Performance",
+        description="Regional and store-level KPIs — revenue, profit margin, loyalty penetration, and customer counts.",
+        db_schema="main_chocolate_sales_mrt",
+        icon="🏦",
+        grain="One row per store",
+        approx_rows="100",
+        columns=20,
+        tags=["stores", "regional", "retail"],
+    ),
+    "mrt_daily_sales": TableRegistryEntry(
+        table_id="mrt_daily_sales",
+        display_name="Daily Sales Trend",
+        description="Time-series at daily grain. Ideal for high-density trend analysis and forecasting.",
+        db_schema="main_chocolate_sales_mrt",
+        icon="📈",
+        grain="One row per calendar day",
+        approx_rows="185",
+        columns=20,
+        tags=["time-series", "trends", "forecasting"],
+    ),
 }
 
 
-def list_tables() -> list[dict]:
-    """Return all registered tables as a list, with table_id included."""
-    return [{"table_id": k, **v} for k, v in TABLE_REGISTRY.items()]
+def list_tables() -> list[TableRegistryEntry]:
+    """Return all registered tables as a list of TableRegistryEntry models."""
+    return list(TABLE_REGISTRY.values())
 
 
 def load_table(table_id: str) -> pd.DataFrame:
@@ -98,11 +105,10 @@ def load_table(table_id: str) -> pd.DataFrame:
         )
 
     meta = TABLE_REGISTRY[table_id]
-    schema = meta["schema"]
 
     con = duckdb.connect(str(WAREHOUSE_PATH), read_only=True)
     try:
-        df = con.execute(f"SELECT * FROM {schema}.{table_id}").df()
+        df = con.execute(f"SELECT * FROM {meta.db_schema}.{table_id}").df()
     finally:
         con.close()
 

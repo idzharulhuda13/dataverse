@@ -8,7 +8,7 @@ Two-step pipeline:
 Uses reportlab Platypus (Flowables) for responsive, document-flow PDF composition.
 
 Public API:
-  - generate_infographic_content()  -> dict (agent's structured JSON)
+  - generate_infographic_content()  -> InfographicContent (Pydantic model)
   - render_infographic_pdf()        -> bytes (PDF file)
 """
 
@@ -32,6 +32,12 @@ from reportlab.platypus import (
     Paragraph, Table, TableStyle, Spacer, Image, KeepTogether
 )
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+
+from dataverse_agent.schemas import (
+    InfographicContent,
+    InfographicMetric,
+    CalculatedMetric,
+)
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # CONSTANTS — Infographic Theme
@@ -111,8 +117,12 @@ async def generate_infographic_content(
     dataset_name: str,
     df: pd.DataFrame,
     usage_tracker=None,
-) -> dict:
-    """Send all pinned charts to Gemini and get structured infographic content."""
+) -> InfographicContent:
+    """Send all pinned charts to Gemini and get structured infographic content.
+
+    Returns:
+        InfographicContent Pydantic model with all narrative fields and calculated metrics.
+    """
     from google.genai import types
 
     image_parts = []
@@ -158,31 +168,27 @@ async def generate_infographic_content(
                 if p.text:
                     response_text += p.text
 
-    agent_json = _parse_agent_response(response_text, len(dashboard_items))
-    
+    content = _parse_agent_response(response_text, len(dashboard_items))
+
     # Deterministically calculate metric values from the actual dataframe
-    metrics_list = agent_json.get("metrics")
-    if not isinstance(metrics_list, list):
-        metrics_list = []
-        
-    agent_json["calculated_metrics"] = _calculate_metric_values(df, metrics_list)
-    
-    return agent_json
+    content.calculated_metrics = _calculate_metric_values(df, content.metrics)
+
+    return content
 
 
-def _calculate_metric_values(df: pd.DataFrame, metrics: list[dict]) -> list[dict]:
+def _calculate_metric_values(
+    df: pd.DataFrame,
+    metrics: list[InfographicMetric],
+) -> list[CalculatedMetric]:
     """Calculate deterministic values for the agent-suggested metrics."""
-    results = []
+    results: list[CalculatedMetric] = []
     for m in metrics:
-        if not isinstance(m, dict):
-            continue
-        label = m.get("label", "Metric")
-        col = m.get("column")
-        op = m.get("op", "count")
-        
+        label = m.label
+        col = m.column
+        op = m.op
+
         value = None
         if not col or col not in df.columns:
-            # Fallback to row count if column is missing or invalid
             value = len(df)
             label = "Total Records"
         else:
@@ -197,28 +203,24 @@ def _calculate_metric_values(df: pd.DataFrame, metrics: list[dict]) -> list[dict
                     value = df[col].max()
                 elif op == "min":
                     value = df[col].min()
-                else: # count
+                else:  # count
                     value = df[col].count()
             except Exception:
                 value = len(df)
                 label = "Total Records"
-        
-        # Special handling for percentages: if column name has 'growth', 'rate', or '%'
+
+        # Special handling for percentages
         if value is not None and any(x in str(col).lower() for x in ['%', 'growth', 'rate']):
             if isinstance(value, (int, float)):
                 label = label if "%" in label else f"{label} (%)"
 
-        results.append({
-            "label": label,
-            "value": value,
-            "op": op
-        })
-    
+        results.append(CalculatedMetric(label=label, value=value, op=op))
+
     return results
 
 
-def _parse_agent_response(raw_text: str, chart_count: int) -> dict:
-    """Parse and validate the agent's JSON response with fallback handling."""
+def _parse_agent_response(raw_text: str, chart_count: int) -> InfographicContent:
+    """Parse and validate the agent's JSON response into an InfographicContent model."""
     cleaned = raw_text.strip()
     if cleaned.startswith("```"):
         lines = cleaned.split("\n")
@@ -229,64 +231,63 @@ def _parse_agent_response(raw_text: str, chart_count: int) -> dict:
         cleaned = "\n".join(lines)
 
     try:
-        content = json.loads(cleaned)
+        raw = json.loads(cleaned)
     except json.JSONDecodeError:
-        content = _fallback_content(chart_count)
+        return _fallback_content(chart_count)
 
-    # Validate and fill missing fields
-    if "infographic_title" not in content:
-        content["infographic_title"] = "Data Analysis Overview"
-    if "infographic_subtitle" not in content:
-        content["infographic_subtitle"] = "Key insights from your dataset"
-    if "chart_headlines" not in content or len(content["chart_headlines"]) != chart_count:
-        content["chart_headlines"] = [f"Chart {i + 1}" for i in range(chart_count)]
-    if "key_takeaways" not in content or not content["key_takeaways"]:
-        content["key_takeaways"] = ["Analysis reveals notable patterns in the data."]
-    if "conclusion" in content:
-        content["conclusion"] = content["conclusion"]
-    else:
-        content["conclusion"] = "Further analysis recommended to uncover deeper trends."
-        
-    if "metrics" not in content or not isinstance(content["metrics"], list):
-        content["metrics"] = []
+    # Ensure chart_headlines has the right count
+    headlines = raw.get("chart_headlines", [])
+    if len(headlines) != chart_count:
+        headlines = [f"Chart {i + 1}" for i in range(chart_count)]
 
-    return content
+    # Parse metrics safely
+    raw_metrics = raw.get("metrics", [])
+    metrics: list[InfographicMetric] = []
+    for m in raw_metrics:
+        if isinstance(m, dict) and "label" in m and "column" in m:
+            try:
+                metrics.append(InfographicMetric.model_validate(m))
+            except Exception:
+                pass
+
+    return InfographicContent(
+        infographic_title=raw.get("infographic_title", "Data Analysis Overview"),
+        infographic_subtitle=raw.get("infographic_subtitle", "Key insights from your dataset"),
+        chart_headlines=headlines,
+        key_takeaways=raw.get("key_takeaways") or ["Analysis reveals notable patterns in the data."],
+        conclusion=raw.get("conclusion", "Further analysis recommended to uncover deeper trends."),
+        metrics=metrics,
+    )
 
 
-def _fallback_content(chart_count: int) -> dict:
+def _fallback_content(chart_count: int) -> InfographicContent:
     """Minimal fallback when agent response can't be parsed."""
-    return {
-        "infographic_title": "Data Analysis Overview",
-        "infographic_subtitle": "Key insights from your dataset",
-        "chart_headlines": [f"Chart {i + 1}" for i in range(chart_count)],
-        "key_takeaways": ["Analysis reveals notable patterns in the data."],
-        "conclusion": "Further analysis recommended to uncover deeper trends.",
-    }
+    return InfographicContent(
+        chart_headlines=[f"Chart {i + 1}" for i in range(chart_count)],
+    )
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # STEP 2: PDF Composition (Platypus Flowables)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-def _header_footer_template(canvas_obj: canvas.Canvas, doc: BaseDocTemplate, content: dict):
+def _header_footer_template(canvas_obj: canvas.Canvas, doc: BaseDocTemplate, content: InfographicContent):
     """Draw the fixed header and footer on every page before flowables are placed."""
     canvas_obj.saveState()
-    
+
     # Background
     canvas_obj.setFillColor(BG_COLOR)
     canvas_obj.rect(0, 0, PAGE_W, PAGE_H, fill=1, stroke=0)
 
     # --- Header ---
     header_h = 75
-    # Dark header strip
     canvas_obj.setFillColor(DARK_BG)
     canvas_obj.rect(0, PAGE_H - header_h, PAGE_W, header_h, fill=1, stroke=0)
-    # Gold top line
     canvas_obj.setFillColor(GOLD)
     canvas_obj.rect(0, PAGE_H - 4, PAGE_W, 4, fill=1, stroke=0)
 
     # Title
-    title_text = content.get("infographic_title", "").upper()
+    title_text = content.infographic_title.upper()
     title_size = 22
     while canvas_obj.stringWidth(title_text, "Helvetica-Bold", title_size) > PAGE_W - 80 and title_size > 12:
         title_size -= 1
@@ -295,7 +296,7 @@ def _header_footer_template(canvas_obj: canvas.Canvas, doc: BaseDocTemplate, con
     canvas_obj.drawCentredString(PAGE_W / 2, PAGE_H - header_h * 0.45, title_text)
 
     # Subtitle
-    sub_text = content.get("infographic_subtitle", "")
+    sub_text = content.infographic_subtitle
     sub_size = 11
     while canvas_obj.stringWidth(sub_text, "Helvetica-Oblique", sub_size) > PAGE_W - 80 and sub_size > 8:
         sub_size -= 1
@@ -305,14 +306,11 @@ def _header_footer_template(canvas_obj: canvas.Canvas, doc: BaseDocTemplate, con
 
     # --- Footer ---
     footer_h = 24
-    # Dark footer strip
     canvas_obj.setFillColor(DARK_BG)
     canvas_obj.rect(0, 0, PAGE_W, footer_h, fill=1, stroke=0)
-    # Gold separator line
     canvas_obj.setFillColor(GOLD)
     canvas_obj.rect(0, footer_h, PAGE_W, 2, fill=1, stroke=0)
 
-    # Text
     generation_time = datetime.now().strftime("%B %d, %Y at %I:%M %p")
     canvas_obj.setFillColor(CAPTION_COLOR)
     canvas_obj.setFont("Helvetica", 7)
@@ -320,31 +318,30 @@ def _header_footer_template(canvas_obj: canvas.Canvas, doc: BaseDocTemplate, con
         PAGE_W / 2, footer_h * 0.35,
         f"Generated by DataVerse  |  {generation_time}"
     )
-    
+
     canvas_obj.restoreState()
 
 
 def render_infographic_pdf(
-    content: dict,
+    content: InfographicContent,
     dashboard_items: list[dict],
     dataset_name: str,
 ) -> bytes:
     """Compose a single-page scrolling infographic PDF (dynamic height)."""
     from dataverse_agent.tools import _human_format
-    
+
     # ── 1. Setup Base Layout ───
     A4_WIDTH = A4[0]
     LEFT_MARGIN = 36
     RIGHT_MARGIN = 36
     CONTENT_WIDTH = A4_WIDTH - LEFT_MARGIN - RIGHT_MARGIN
-    
-    # Header/Footer Fixed Heights
+
     HEADER_H = 90
     FOOTER_H = 25
-    
+
     pdf_buffer = io.BytesIO()
     styles = getSampleStyleSheet()
-    
+
     # Custom styles
     headline_style = ParagraphStyle(
         name='Headline',
@@ -401,27 +398,19 @@ def render_infographic_pdf(
     story.append(Spacer(1, 8))
 
     # --- Metrics Bar (KPI Cards) ---
-    metrics = content.get("calculated_metrics", [])
+    metrics = content.calculated_metrics
     if metrics:
-        metric_cards = []
         count = len(metrics)
-        # Determine columns (max 4 per row for visual balance)
         cols = min(count, 4)
-        # Padding between cards
         gap = 6
-        # Responsive card width based on number of columns
         card_w = (CONTENT_WIDTH - (gap * (cols - 1))) / cols
-        
+
         table_rows = []
         current_row = []
-        
+
         for i, m in enumerate(metrics):
-            if not isinstance(m, dict):
-                continue
-            
             try:
-                val = m.get("value")
-                # Handle None or non-numeric values for _human_format
+                val = m.value
                 if val is None:
                     val_text = "N/A"
                 else:
@@ -429,18 +418,17 @@ def render_infographic_pdf(
                         val_text = _human_format(val)
                     except Exception:
                         val_text = str(val)
-                
-                label_text = str(m.get("label", "METRIC")).upper()
-                
-                # Variety in colors
+
+                label_text = str(m.label).upper()
+
                 border_colors = [TEAL, GOLD, NAVY, LIGHT_TEAL, GOLD, TEAL]
                 b_color = border_colors[i % len(border_colors)]
-                
+
                 card_content = [
                     [Paragraph(label_text, metric_label_style)],
                     [Paragraph(val_text, metric_value_style)]
                 ]
-                
+
                 card_table = Table(card_content, colWidths=[card_w], style=[
                     ('ALIGN', (0,0), (-1,-1), 'CENTER'),
                     ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
@@ -450,60 +438,54 @@ def render_infographic_pdf(
                     ('TOPPADDING', (0,0), (-1,-1), 4),
                     ('BOTTOMPADDING', (0,0), (-1,-1), 6),
                 ])
-                
+
                 current_row.append(card_table)
             except Exception:
-                # Skip this specific card if it fails for any reason
                 continue
-            
-            # Wrap to next row if we exceed max columns
+
             if len(current_row) == cols:
                 table_rows.append(current_row)
                 current_row = []
-        
-        # Handle trailing metrics if any
+
         if current_row:
-            # Fill with empty cells for layout stability
             while len(current_row) < cols:
                 current_row.append("")
             table_rows.append(current_row)
-        
-        # Final row spacing
-        metrics_grid = Table(table_rows, colWidths=[card_w + (gap if i < cols-1 else 0) for i in range(cols)], style=[
-            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-            ('VALIGN', (0,0), (-1,-1), 'TOP'),
-            ('BOTTOMPADDING', (0,0), (-1,-1), 10),
-            ('LEFTPADDING', (0,0), (-1,-1), 0),
-            ('RIGHTPADDING', (0,0), (-1,-1), 0),
-        ])
+
+        metrics_grid = Table(
+            table_rows,
+            colWidths=[card_w + (gap if i < cols-1 else 0) for i in range(cols)],
+            style=[
+                ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                ('VALIGN', (0,0), (-1,-1), 'TOP'),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 10),
+                ('LEFTPADDING', (0,0), (-1,-1), 0),
+                ('RIGHTPADDING', (0,0), (-1,-1), 0),
+            ]
+        )
         story.append(metrics_grid)
         story.append(Spacer(1, 10))
 
     # --- Charts Grid (Responsive Table) ---
     chart_figures = _prepare_chart_images(dashboard_items)
-    headlines = content.get("chart_headlines", [])
-    
+    headlines = content.chart_headlines
+
     if chart_figures:
-        # Determine cols based on chart count (max 2)
         cols = 2 if len(chart_figures) > 1 else 1
         col_width = (CONTENT_WIDTH - 15) / cols if cols > 1 else CONTENT_WIDTH
-        
-        # Build grid data: [[cell1, cell2], [cell3...]]
+
         table_data = []
         current_row = []
-        
+
         for i, img_buf in enumerate(chart_figures):
             headline_text = headlines[i] if i < len(headlines) else ""
-            
-            # Create a Platypus Image
+
             img_buf.seek(0)
             img = Image(img_buf)
-            # Scale image width to fit column width
             aspect = img.imageHeight / float(img.imageWidth)
             img.drawWidth = col_width - 10
             img.drawHeight = (col_width - 10) * aspect
-            
-            # Put Image and Paragraph into a nested arrangement (a single column Table is perfect for a card)
+
             card_data = [
                 [img],
                 [Spacer(1, 5)],
@@ -519,21 +501,18 @@ def render_infographic_pdf(
                 ('LEFTPADDING', (0,0), (-1,-1), 2),
                 ('RIGHTPADDING', (0,0), (-1,-1), 2),
             ])
-            
+
             current_row.append(card_table)
-            
-            # Wrap row
+
             if len(current_row) == cols:
                 table_data.append(current_row)
                 current_row = []
-                
-        # Handle trailing odd items
+
         if current_row:
             if cols > 1:
-                current_row.append("") # Empty cell to balance the 2-col row
+                current_row.append("")
             table_data.append(current_row)
-            
-        # Add the chart grid Table to story
+
         grid_table = Table(table_data, colWidths=[col_width + 10]*cols, style=[
             ('ALIGN', (0,0), (-1,-1), 'CENTER'),
             ('VALIGN', (0,0), (-1,-1), 'TOP'),
@@ -543,13 +522,11 @@ def render_infographic_pdf(
         story.append(Spacer(1, 10))
 
     # --- Takeaways Box ---
-    takeaways = content.get("key_takeaways", [])
+    takeaways = content.key_takeaways
     if takeaways:
         box_story = []
-        
-        # Add Title Line
+
         box_story.append(Paragraph("KEY TAKEAWAYS", takeaway_title_style))
-        # Add a gold separating line using a narrow Table
         line_table = Table([[""]], colWidths=[120], rowHeights=[2], style=[
             ('BACKGROUND', (0,0), (0,0), GOLD),
             ('BOTTOMPADDING', (0,0), (-1,-1), 0),
@@ -557,27 +534,24 @@ def render_infographic_pdf(
         ])
         box_story.append(line_table)
         box_story.append(Spacer(1, 10))
-        
-        # Add Bullets
+
         for idx, t in enumerate(takeaways[:5]):
             p = Paragraph(f"• &nbsp; {t}", takeaway_bullet_style)
             box_story.append(p)
-            
-        # Add Conclusion
-        conclusion = content.get("conclusion", "")
+
+        conclusion = content.conclusion
         if conclusion:
             box_story.append(Paragraph(f"{conclusion}", conclusion_style))
-            
-        # Wrap everything in a Background Table to act as the Navy Box
+
         takeaway_card = Table([[box_story]], colWidths=[CONTENT_WIDTH], style=[
             ('BACKGROUND', (0,0), (-1,-1), NAVY),
-            ('BOX', (0,0), (-1,-1), 0, NAVY), # Border
+            ('BOX', (0,0), (-1,-1), 0, NAVY),
             ('TOPPADDING', (0,0), (-1,-1), 15),
             ('BOTTOMPADDING', (0,0), (-1,-1), 15),
             ('LEFTPADDING', (0,0), (-1,-1), 20),
             ('RIGHTPADDING', (0,0), (-1,-1), 20),
         ])
-        
+
         story.append(takeaway_card)
 
     # ── 3. Calculate Dynamic Height ───
@@ -585,12 +559,11 @@ def render_infographic_pdf(
     for flowable in story:
         w, h = flowable.wrap(CONTENT_WIDTH, 1000000)
         current_h += h
-        # Add a tiny buffer for spacers/padding between elements
         if isinstance(flowable, Spacer):
-            current_h += 2 
+            current_h += 2
 
     final_height = max(current_h + HEADER_H + FOOTER_H + 60, A4[1])
-    
+
     # Pre-define header styles for canvas drawing
     header_title_style = ParagraphStyle(
         name='HeaderTitle', fontName='Helvetica-Bold', fontSize=18, textColor=HexColor("#FFFFFF"),
@@ -609,28 +582,24 @@ def render_infographic_pdf(
         rightMargin=RIGHT_MARGIN,
         topMargin=HEADER_H + 10,
         bottomMargin=FOOTER_H + 10,
-        title=content.get("infographic_title", "DataVerse Infographic")
+        title=content.infographic_title,
     )
 
     def draw_fixed_elements(canvas, doc):
         canvas.saveState()
-        # Header (Top)
         canvas.setFillColor(NAVY)
         canvas.rect(0, final_height - HEADER_H, A4_WIDTH, HEADER_H, fill=1)
-        
-        # Title with wrapping
-        title_text = content.get("infographic_title", "DATA ANALYSIS OVERVIEW").upper()
+
+        title_text = content.infographic_title.upper()
         p_title = Paragraph(title_text, header_title_style)
         w, h = p_title.wrap(CONTENT_WIDTH, HEADER_H)
         p_title.drawOn(canvas, LEFT_MARGIN, final_height - 15 - h)
-        
-        # Subtitle with wrapping (positioned relative to title)
-        subtitle_text = content.get("infographic_subtitle", f"Automated Insights for {dataset_name}").upper()
+
+        subtitle_text = content.infographic_subtitle.upper()
         p_sub = Paragraph(subtitle_text, header_subtitle_style)
         w_s, h_s = p_sub.wrap(CONTENT_WIDTH, HEADER_H)
         p_sub.drawOn(canvas, LEFT_MARGIN, final_height - 15 - h - 5 - h_s)
-        
-        # Footer (Bottom)
+
         canvas.setFillColor(NAVY)
         canvas.rect(0, 0, A4_WIDTH, FOOTER_H, fill=1)
         canvas.setFillColor(HexColor("#FFFFFF"))
@@ -641,9 +610,9 @@ def render_infographic_pdf(
     frame = Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height, id='normal')
     template = PageTemplate(id='ScrollingPage', frames=frame, onPage=draw_fixed_elements)
     doc.addPageTemplates([template])
-    
+
     doc.build(story)
-    
+
     return pdf_buffer.getvalue()
 
 

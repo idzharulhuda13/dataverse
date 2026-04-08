@@ -1,21 +1,27 @@
 import pandas as pd
 from dataverse_agent.tools import get_data_summary, set_session_context
+from dataverse_agent.schemas import SlashCommandAction, SlashCommandResult
 
-def handle_slash_command(prompt: str, df: pd.DataFrame, usage_stats=None):
+
+def handle_slash_command(
+    prompt: str,
+    df: pd.DataFrame,
+    usage_stats=None,
+) -> SlashCommandResult:
     """
     Parses and executes slash commands.
-    
+
     Args:
         prompt: The raw user input starting with '/'.
         df: The current modified_df from session state.
         usage_stats: The SessionUsage object from session state.
-        
+
     Returns:
-        tuple: (handled: bool, response: str | dict)
-               If handled is True, response is the text to show or a dict for special actions.
+        SlashCommandResult with .handled, .text (str response), and/or
+        .action (SlashCommandAction for special UI-level operations).
     """
     if not prompt.startswith('/'):
-        return False, None
+        return SlashCommandResult(handled=False)
 
     # Sync context for tools (e.g. get_data_summary rely on threading.local)
     if df is not None:
@@ -42,23 +48,32 @@ def handle_slash_command(prompt: str, df: pd.DataFrame, usage_stats=None):
 | `/cost` | Show detailed token usage and estimated session cost. |
 | `/help` | Show this help menu. |
         """
-        return True, help_text
+        return SlashCommandResult(handled=True, text=help_text)
 
     if cmd == '/summary':
         if df is not None:
-            return True, f"### 📊 Data Summary\n\n{get_data_summary()}"
-        return True, "No dataset loaded yet."
+            return SlashCommandResult(
+                handled=True,
+                text=f"### 📊 Data Summary\n\n{get_data_summary()}",
+            )
+        return SlashCommandResult(handled=True, text="No dataset loaded yet.")
 
     if cmd == '/columns':
         if df is not None:
-            return True, f"### 📁 Column Definitions\n\n```\n{df.dtypes.to_string()}\n```"
-        return True, "No dataset loaded yet."
+            return SlashCommandResult(
+                handled=True,
+                text=f"### 📁 Column Definitions\n\n```\n{df.dtypes.to_string()}\n```",
+            )
+        return SlashCommandResult(handled=True, text="No dataset loaded yet.")
 
     if cmd == '/head':
         if df is not None:
             n = int(args[0]) if args and args[0].isdigit() else 5
-            return True, f"### 🔍 First {n} Rows\n\n{df.head(n).to_markdown()}"
-        return True, "No dataset loaded yet."
+            return SlashCommandResult(
+                handled=True,
+                text=f"### 🔍 First {n} Rows\n\n{df.head(n).to_markdown()}",
+            )
+        return SlashCommandResult(handled=True, text="No dataset loaded yet.")
 
     if cmd == '/cost':
         if usage_stats:
@@ -70,11 +85,17 @@ def handle_slash_command(prompt: str, df: pd.DataFrame, usage_stats=None):
 - **Total Tokens:** {usage_stats.total_tokens:,}
 - **Estimated Cost:** `${usage_stats.estimated_cost_usd:.4f}`
             """
-            return True, cost_text
-        return True, "Usage tracking not available."
+            return SlashCommandResult(handled=True, text=cost_text)
+        return SlashCommandResult(handled=True, text="Usage tracking not available.")
 
     # Special actions that need UI-level handling
     if cmd in ('/export', '/undo', '/pin', '/clear', '/infographic'):
-        return True, {"action": cmd[1:], "args": args}
+        return SlashCommandResult(
+            handled=True,
+            action=SlashCommandAction(action=cmd[1:], args=args),
+        )
 
-    return True, f"Unknown command: `{cmd}`. Type `/help` for available commands."
+    return SlashCommandResult(
+        handled=True,
+        text=f"Unknown command: `{cmd}`. Type `/help` for available commands.",
+    )

@@ -13,6 +13,7 @@ from google import genai
 from google.genai import types
 
 from dataverse_agent.prompts import load_prompt
+from dataverse_agent.schemas import EnricherResult, UsageMetadata
 
 # Load the enricher system prompt once at import time
 _ENRICHER_SYSTEM_PROMPT = load_prompt('enricher')
@@ -28,7 +29,12 @@ def _get_client() -> genai.Client:
     return _client
 
 
-def enrich_query(user_text: str, df: pd.DataFrame, chat_history: list[dict] = None, dataset_name: str = None) -> tuple[str, dict]:
+def enrich_query(
+    user_text: str,
+    df: pd.DataFrame,
+    chat_history: list[dict] | None = None,
+    dataset_name: str | None = None,
+) -> EnricherResult:
     """Rewrite a vague user query into a specific analytical prompt.
 
     Args:
@@ -38,7 +44,7 @@ def enrich_query(user_text: str, df: pd.DataFrame, chat_history: list[dict] = No
         dataset_name: Optional human-readable dataset name (used in enterprise mode).
 
     Returns:
-        A tuple of (enriched_query_string, usage_metadata_dict).
+        EnricherResult with .enriched_query (str) and .usage (UsageMetadata).
     """
     # Build compact chat history context
     history_context = ""
@@ -47,7 +53,6 @@ def enrich_query(user_text: str, df: pd.DataFrame, chat_history: list[dict] = No
         for msg in chat_history[-5:]:
             role = msg.get("role", "user").capitalize()
             content = msg.get("content", "")
-            # Filter out potentially large technical fields for the enricher
             history_context += f"- {role}: {content[:500]}\n"
         history_context += "\n"
 
@@ -72,12 +77,14 @@ def enrich_query(user_text: str, df: pd.DataFrame, chat_history: list[dict] = No
             temperature=0.0,
         ),
     )
-    
-    # Extract usage metadata for token tracking
-    usage = {
-        "prompt_token_count": response.usage_metadata.prompt_token_count,
-        "candidates_token_count": response.usage_metadata.candidates_token_count,
-        "total_token_count": response.usage_metadata.total_token_count,
-    }
-    
-    return response.text.strip(), usage
+
+    usage = UsageMetadata(
+        prompt_token_count=response.usage_metadata.prompt_token_count,
+        candidates_token_count=response.usage_metadata.candidates_token_count,
+        total_token_count=response.usage_metadata.total_token_count,
+    )
+
+    return EnricherResult(
+        enriched_query=response.text.strip(),
+        usage=usage,
+    )

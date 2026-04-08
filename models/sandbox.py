@@ -13,7 +13,6 @@ import io
 import sys
 import threading
 import traceback
-from dataclasses import dataclass, field
 from typing import Optional
 
 import matplotlib.pyplot as plt
@@ -21,6 +20,8 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from matplotlib.figure import Figure
+
+from dataverse_agent.schemas import SandboxResult
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -60,29 +61,13 @@ BLOCKED_DUNDER_ATTRS = frozenset({
 
 # Methods that write to the filesystem (to prevent file leaks)
 BLOCKED_WRITE_ATTRIBUTES = frozenset({
-    "to_csv", "to_excel", "to_json", "to_sql", "to_parquet", 
+    "to_csv", "to_excel", "to_json", "to_sql", "to_parquet",
     "to_pickle", "to_feather", "to_stata", "to_latex", "to_html",
     "to_markdown", "savefig", "save"
 })
 
 MAX_OUTPUT_BYTES = 50 * 1024  # 50 KB
 DEFAULT_TIMEOUT = 30  # seconds
-
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# RESULT TYPE
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-@dataclass
-class SandboxResult:
-    """Result of a sandboxed code execution."""
-    output: Optional[str] = None
-    dataframe: Optional[pd.DataFrame] = None
-    display_df: Optional[pd.DataFrame] = None
-    figure: Optional[Figure] = None
-    error: Optional[str] = None
-    blocked: bool = False
-    blocked_reason: Optional[str] = None
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -177,7 +162,6 @@ def validate_code(code: str) -> Optional[str]:
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 # Modules that LLM-generated code is allowed to import at runtime.
-# These are safe analytics/viz libraries — no filesystem, network, or OS access.
 ALLOWED_MODULES = frozenset({
     "pandas", "numpy", "matplotlib", "seaborn", "prophet",
     "math", "statistics", "collections", "itertools", "functools",
@@ -189,11 +173,6 @@ ALLOWED_MODULES = frozenset({
 def _make_restricted_import():
     """
     Create a restricted __import__ function that only allows safe modules.
-
-    LLM-generated code commonly includes `import seaborn as sns` or
-    `import matplotlib.pyplot as plt` at the top. Python's `import` statement
-    delegates to `__import__` at runtime, so we need to provide a gated version
-    rather than removing it entirely.
     """
     _real_import = __builtins__.__import__ if hasattr(__builtins__, '__import__') else __import__
 
@@ -233,8 +212,6 @@ def _build_safe_builtins() -> dict:
 def _build_exec_namespace(df: pd.DataFrame) -> dict:
     """
     Build the restricted globals dict for exec().
-
-    Only provides the libraries needed for data analysis + visualization.
     """
     return {
         # Data
@@ -278,8 +255,6 @@ def _exec_with_timeout(code: str, exec_globals: dict, timeout: int) -> Optional[
     thread.join(timeout=timeout)
 
     if thread.is_alive():
-        # Thread is still running — it exceeded the timeout.
-        # Daemon threads will be cleaned up when the main process exits.
         return (
             f"Code execution timed out after {timeout} seconds. "
             f"The code may contain an infinite loop or be too computationally expensive."
@@ -352,7 +327,6 @@ def safe_execute(
 
     # Retrieve viz_df (Visual Analyst temp subset), final_df (Cleaning Agent persistent),
     # or display_df (Standalone table for chat rendering).
-    # viz_df takes priority — if present, it's the Visual Analyst's scoped filtered subset.
     viz_df = exec_globals.get("viz_df", None)
     final_df = exec_globals.get("final_df", None)
     display_df = exec_globals.get("display_df", None)
@@ -361,7 +335,7 @@ def safe_execute(
     if captured_df is not None and not isinstance(captured_df, pd.DataFrame):
         var_name = "viz_df" if viz_df is not None else "final_df"
         return SandboxResult(error=f"'{var_name}' must be a DataFrame.")
-    
+
     if display_df is not None and not isinstance(display_df, pd.DataFrame):
         return SandboxResult(error="'display_df' must be a DataFrame.")
 

@@ -1,8 +1,10 @@
 import re
 import io
-from typing import Any, Optional, Tuple
+from typing import Any
 
 import pandas as pd
+
+from dataverse_agent.schemas import DataLoadResult
 
 SUPPORTED_EXTENSIONS = (".csv", ".xls", ".xlsx", ".parquet", ".json", ".tsv")
 MAX_FILE_SIZE_MB = 200
@@ -11,7 +13,7 @@ MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
 
 def load_dataframe(
     file: Any, sheet_name: Any = 0
-) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
+) -> DataLoadResult:
     """
     Load a data file into a DataFrame with format auto-detection.
 
@@ -23,16 +25,17 @@ def load_dataframe(
                     Defaults to 0 (first sheet).
 
     Returns:
-        tuple: (Loaded DataFrame if valid, otherwise None; Error message or None)
+        DataLoadResult with .df (DataFrame) and .error (str | None).
+        Check .ok or .error to determine success.
     """
     try:
         # ── File size guard ──────────────────────────────────────────────
         file_size = getattr(file, "size", None)
         if file_size is not None and file_size > MAX_FILE_SIZE_BYTES:
-            return None, (
+            return DataLoadResult(error=(
                 f"File is too large ({file_size / (1024*1024):.1f} MB). "
                 f"Maximum allowed size is {MAX_FILE_SIZE_MB} MB."
-            )
+            ))
 
         # ── Format detection ─────────────────────────────────────────────
         name = getattr(file, "name", "").lower()
@@ -49,25 +52,24 @@ def load_dataframe(
             df = pd.read_csv(file, sep="\t")
         else:
             ext = name.rsplit(".", 1)[-1] if "." in name else "unknown"
-            return None, (
+            return DataLoadResult(error=(
                 f"Unsupported file format: .{ext}. "
                 f"Supported formats: CSV, Excel, Parquet, JSON, TSV."
-            )
+            ))
 
         if df.empty:
-            return None, "The uploaded file contains no data."
+            return DataLoadResult(error="The uploaded file contains no data.")
 
-        return df, None
+        return DataLoadResult(df=df)
 
     except pd.errors.EmptyDataError:
-        return None, "The file is empty or invalid."
+        return DataLoadResult(error="The file is empty or invalid.")
     except pd.errors.ParserError:
-        return None, "The file could not be parsed. Please check its format."
+        return DataLoadResult(error="The file could not be parsed. Please check its format.")
     except ImportError as e:
-        # e.g. openpyxl not installed for .xlsx
-        return None, f"Missing dependency for this file format: {e}"
+        return DataLoadResult(error=f"Missing dependency for this file format: {e}")
     except Exception as e:
-        return None, str(e)
+        return DataLoadResult(error=str(e))
 
 
 def get_excel_sheet_names(file: Any) -> list[str]:
@@ -85,7 +87,6 @@ def get_excel_sheet_names(file: Any) -> list[str]:
         return xls.sheet_names
     except Exception:
         return []
-
 
 
 def extract_non_code_text(reply: str) -> str:
