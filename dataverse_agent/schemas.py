@@ -40,6 +40,8 @@ class SessionUsage(BaseModel):
     input_tokens: int = 0
     output_tokens: int = 0
     image_tokens: int = 0
+    error_count: int = 0
+    retry_count: int = 0
     trace: list[TraceEvent] = Field(default_factory=list)
 
     @property
@@ -69,6 +71,14 @@ class SessionUsage(BaseModel):
     def record_turn(self) -> None:
         """Record a completed conversation turn (User + Assistant)."""
         self.turns += 1
+
+    def record_error(self) -> None:
+        """Record a technical error occurrence."""
+        self.error_count += 1
+
+    def record_retry(self) -> None:
+        """Record a silent agent retry attempt."""
+        self.retry_count += 1
 
     def record_trace(
         self,
