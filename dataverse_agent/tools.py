@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import seaborn as sns
 from google.adk.tools import FunctionTool
+from dataverse_agent.errors import error_guardrail
 
 # Use threading.local to safely pass the DataFrame and Figures
 # between Streamlit's main execution thread and the ADK tools execution context
@@ -194,6 +195,7 @@ def _percent_format(val, pos=None):
     """Format decimal values (0.0 to 1.0) as percentages (0% to 100%)."""
     return f"{val * 100:.1f}%".replace(".0%", "%")
 
+@error_guardrail(context="Visualization")
 def create_visualization(chart_type: str, x_column: str, y_column: str = None, y2_column: str = None, hue: str = None, size: str = None, estimator: str = "mean", title: str = None, subtitle: str = None, sort_order: str = "ascending", show_trend: bool = False, v_line: float = None, h_line: float = None) -> str:
     """Create a Seaborn or Matplotlib visualization from the dataset.
     
@@ -674,6 +676,7 @@ def get_data_summary() -> str:
     
     return f"Data Summary:\n{info_str}\n\nFirst 5 rows:\n{head_str}"
 
+@error_guardrail(context="Logic")
 def execute_python_code_fallback(code: str) -> str:
     """Fallback tool to execute arbitrary Python code when standard tools are insufficient.
     This should be used for complex data transformations or custom charts.
@@ -719,6 +722,7 @@ def execute_python_code_fallback(code: str) -> str:
     output = result.output if result.output else "Code executed successfully."
     return output
 
+@error_guardrail(context="Table")
 def create_table(table_code: str, title: str = None, subtitle: str = None) -> str:
     """Generate an interactive, copyable table using Python code.
     The code should result in a pandas DataFrame assigned to a variable named `display_df`.
