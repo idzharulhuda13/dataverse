@@ -158,7 +158,11 @@ def test_percent_axis_formatting():
     assert "%" in formatted_val
 
 def test_hue_legend_formatting():
-    """Ensure the legend title is correctly formatted when hue is used."""
+    """Ensure the legend title is correctly formatted when hue is used.
+    
+    Note: tools.py places legends at the figure level (fig.legends) for consistent
+    outside-axes positioning, so we check fig.legends[0] rather than ax.get_legend().
+    """
     create_visualization(
         chart_type="scatter", 
         x_column="Units_Sold", 
@@ -167,10 +171,10 @@ def test_hue_legend_formatting():
     )
     
     fig = get_session_figures()[0]
-    ax = fig.gca()
     
-    legend = ax.get_legend()
-    assert legend is not None
+    # Legend is attached to the figure (not the axes) for outside-axes placement
+    assert len(fig.legends) > 0, "Expected a figure-level legend to be created"
+    legend = fig.legends[0]
     assert legend.get_title().get_text() == "Average Price EUR"
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

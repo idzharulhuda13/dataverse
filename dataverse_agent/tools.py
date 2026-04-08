@@ -370,8 +370,35 @@ def create_visualization(chart_type: str, x_column: str, y_column: str = None, y
                 ax2.yaxis.grid(False)
         elif chart_type == 'scatter':
             scatter_size = size if size in df.columns else None
-            # Explicitly set legend='auto' to ensure Seaborn generates it even for size
-            sns.scatterplot(data=df, x=x_column, y=y_column, hue=plot_hue, size=scatter_size, sizes=(40, 400), palette=palette, ax=ax, alpha=0.8, edgecolor="white", linewidth=0.5, legend='auto' if use_legend else False)
+
+            # When hue is a numeric column, Seaborn renders a colorbar instead of a
+            # discrete legend — ax.get_legend_handles_labels() comes back empty and
+            # the figure-level legend is never built. Fix: bin the values into 4
+            # quantile labels so Seaborn treats it as categorical and produces a
+            # proper legend with a formatted title.
+            scatter_df = df.copy()
+            if plot_hue and plot_hue in scatter_df.columns and pd.api.types.is_numeric_dtype(scatter_df[plot_hue]):
+                try:
+                    scatter_df[plot_hue] = pd.qcut(
+                        scatter_df[plot_hue],
+                        q=4,
+                        labels=["Low", "Mid-Low", "Mid-High", "High"],
+                        duplicates="drop",
+                    ).astype(str)
+                    # Re-compute palette for 4 bins
+                    palette = PALETTE[:4]
+                except Exception:
+                    pass  # Fall back to original numeric hue if binning fails
+
+            sns.scatterplot(
+                data=scatter_df,
+                x=x_column, y=y_column,
+                hue=plot_hue, size=scatter_size,
+                sizes=(40, 400), palette=palette,
+                ax=ax, alpha=0.8,
+                edgecolor="white", linewidth=0.5,
+                legend='auto' if use_legend else False,
+            )
             if show_trend:
                 sns.regplot(data=df, x=x_column, y=y_column, scatter=False, ax=ax, color=ACCENT, line_kws={"alpha": 0.6})
         elif chart_type == 'hist':

@@ -16,10 +16,10 @@ import pytest
 from models.sandbox import (
     BLOCKED_BUILTINS,
     BLOCKED_MODULES,
-    SandboxResult,
     safe_execute,
     validate_code,
 )
+from dataverse_agent.schemas import SandboxResult
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

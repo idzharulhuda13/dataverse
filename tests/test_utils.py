@@ -44,13 +44,13 @@ def test_load_dataframe_csv(tmp_path):
         def seek(self, pos): self._file.seek(pos)
 
     mock_file = MockFile(csv_file)
-    df, error = load_dataframe(mock_file)
+    result = load_dataframe(mock_file)
     mock_file._file.close()
 
-    assert error is None
-    assert df is not None
-    assert list(df.columns) == ['a', 'b']
-    assert len(df) == 2
+    assert result.error is None
+    assert result.df is not None
+    assert list(result.df.columns) == ['a', 'b']
+    assert len(result.df) == 2
 
 
 def test_load_dataframe_unsupported_format(tmp_path):
@@ -62,6 +62,6 @@ def test_load_dataframe_unsupported_format(tmp_path):
             self.name = str(path)
             self.size = path.stat().st_size
 
-    df, error = load_dataframe(MockFile(bad_file))
-    assert df is None
-    assert "Unsupported file format" in error
+    result = load_dataframe(MockFile(bad_file))
+    assert result.df is None
+    assert "Unsupported file format" in result.error
