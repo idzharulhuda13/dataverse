@@ -105,11 +105,9 @@ def _render_error_mitigation(guidance_json: str):
         data = json.loads(guidance_json)
         st.error(f"⚠️ {data['friendly_message']}")
         
-        cols = st.columns(2)
-        with cols[0]:
-            st.markdown("**Suggested Actions:**")
-            for action in data["suggested_actions"]:
-                st.markdown(f"- {action}")
+        st.markdown("**Suggested Actions:**")
+        actions_list = "\n".join([f"- {a}" for a in data["suggested_actions"]])
+        st.info(actions_list)
         
         if st.session_state.get("show_observability") and data.get("technical_details"):
             with st.expander("🛠️ Technical Details (Debug)", expanded=False):
@@ -193,7 +191,7 @@ with st.sidebar:
         with st.container(border=True):
             user_input = st.text_input("Username", key="login_user")
             pass_input = st.text_input("Password", type="password", key="login_pass")
-            if st.button("Login", use_container_width=True, type="primary"):
+            if st.button("Login", width="stretch", type="primary"):
                 admin_user = st.secrets.get("ADMIN_USERNAME")
                 admin_pass = st.secrets.get("ADMIN_PASSWORD")
                 if user_input == admin_user and pass_input == admin_pass:
@@ -206,7 +204,7 @@ with st.sidebar:
     else:
         with st.container(border=True):
             st.markdown(f"Logged in as **admin**")
-            if st.button("Logout", use_container_width=True):
+            if st.button("Logout", width="stretch"):
                 st.session_state.is_logged_in = False
                 st.rerun()
 
@@ -215,7 +213,7 @@ with st.sidebar:
     st.markdown("## 🗂️ Sessions")
 
     # ── New Session Button ────────────────────────────────────────────────
-    if st.button("➕  New Session", use_container_width=True, type="primary"):
+    if st.button("➕  New Session", width="stretch", type="primary"):
         _save_current_session()
         new_sid = _create_session()
         _load_session(new_sid)
@@ -308,7 +306,7 @@ with st.sidebar:
                         if st.button(
                             f"{icon} {label}",
                             key=f"switch_{sid}",
-                            use_container_width=True,
+                            width="stretch",
                         ):
                             _save_current_session()
                             _load_session(sid)
@@ -412,7 +410,7 @@ with st.sidebar:
 
     # ── Enterprise Mode: Switch Table ─────────────────────────────────────
     if st.session_state.enterprise_mode and st.session_state.get("modified_df") is not None:
-        if st.button("🔄 Switch Table", use_container_width=True, help="Return to the table picker"):
+        if st.button("🔄 Switch Table", width="stretch", help="Return to the table picker"):
             st.session_state.modified_df = None
             st.session_state.enterprise_table_id = None
             st.session_state.enterprise_dataset_name = None
@@ -428,6 +426,9 @@ def _run_agent_and_save(llm_prompt: str, user_display_text: str | None = None):
     Args:
         llm_prompt: The full prompt to send to the LLM (may include system context).
         user_display_text: If provided, added as a visible 'user' message in chat history.
+    
+    Returns:
+        bool: True if agent execution succeeded without a terminal error, False otherwise.
     """
     if user_display_text is not None:
         st.session_state.messages.append({"role": "user", "content": user_display_text})
@@ -641,7 +642,9 @@ def _run_agent_and_save(llm_prompt: str, user_display_text: str | None = None):
         assistant_msg["mitigation_error"] = response_text.split("ERROR_MITIGATION_TRIGGERED:")[1].strip()
         # Fallback: if chart failed, check if we have a table to show instead
         if display_df is None and figure is None:
-             assistant_msg["content"] = "I was unable to complete the specific visualization requested, but I can provide a data summary instead if you'd like."
+             assistant_msg["content"] = "I was unable to complete the specific visualization requested due to a system error, but I've generated a statistical summary of your data below instead."
+             if st.session_state.get("modified_df") is not None:
+                 assistant_msg["table"] = st.session_state.modified_df.describe().reset_index()
     if figure is not None:
         assistant_msg["figure"] = figure
     if insight_text is not None:
@@ -657,6 +660,9 @@ def _run_agent_and_save(llm_prompt: str, user_display_text: str | None = None):
     st.session_state.messages.append(assistant_msg)  # type: ignore
     st.session_state.usage.record_turn()
     _save_current_session()
+
+    # Return success status (True if no terminal error mitigation was triggered)
+    return "mitigation_error" not in assistant_msg
 
 
 def _generate_infographic():
@@ -736,7 +742,7 @@ if st.session_state.enterprise_mode and st.session_state.modified_df is None:
                     f"📐 {_feat.grain} · ~{_feat.approx_rows} rows · {_feat.columns} columns"
                 )
             with _fc3:
-                if st.button("Load →", key="load_mrt_sales", type="primary", use_container_width=True):
+                if st.button("Load →", key="load_mrt_sales", type="primary", width="stretch"):
                     st.session_state.enterprise_table_id = _feat.table_id
                     st.session_state.enterprise_dataset_name = _feat.display_name
                     st.session_state.sessions[_current_sid]["name"] = f"🏢 {_feat.display_name}"
@@ -770,7 +776,7 @@ if st.session_state.enterprise_mode and st.session_state.modified_df is None:
                     st.markdown(f"**{_tbl.display_name}**")
                     st.caption(_tbl.description)
                     st.caption(f"~{_tbl.approx_rows} rows · {_tbl.columns} cols")
-                    if st.button("Load →", key=f"load_{_tbl.table_id}", use_container_width=True):
+                    if st.button("Load →", key=f"load_{_tbl.table_id}", width="stretch"):
                         st.session_state.enterprise_table_id = _tbl.table_id
                         st.session_state.enterprise_dataset_name = _tbl.display_name
                         st.session_state.sessions[_current_sid]["name"] = f"🏢 {_tbl.display_name}"
@@ -873,20 +879,21 @@ if st.session_state.modified_df is None:
                 )
 
                 with st.spinner("Ensuring data quality... (Cleaning Phase)"):
-                    _run_agent_and_save(cleaning_prompt)
+                    success = _run_agent_and_save(cleaning_prompt)
 
                 # PHASE 2: Exploratory Insights (Visual Analyst)
-                # Now that the data is clean (st.session_state.modified_df is updated via _run_agent_and_save),
-                # we fire the original [AUTO-ANALYSIS] prompt for recommendations.
-                auto_prompt = (
-                    "[AUTO-ANALYSIS]\n\n"
-                    "[System Context]: The dataset has been cleaned. "
-                    "Recommend 5 specific insights or analyses the user could explore. "
-                    "Do NOT create any charts yet."
-                )
+                # Only proceed if cleaning succeeded. If cleaning failed (e.g. 503 error),
+                # we stop here so the user can see the mitigation guidance.
+                if success:
+                    auto_prompt = (
+                        "[AUTO-ANALYSIS]\n\n"
+                        "[System Context]: The dataset has been cleaned. "
+                        "Recommend 5 specific insights or analyses the user could explore. "
+                        "Do NOT create any charts yet."
+                    )
 
-                with st.spinner(random.choice(ANALYZING_DATA_MESSAGES)):
-                    _run_agent_and_save(auto_prompt)
+                    with st.spinner(random.choice(ANALYZING_DATA_MESSAGES)):
+                        _run_agent_and_save(auto_prompt)
 
                 st.rerun()
 
@@ -950,7 +957,7 @@ else:
 
                 # Show generated standalone table (pivot tables, summaries, etc)
                 if "table" in msg:
-                    st.dataframe(msg["table"], use_container_width=True)
+                    st.dataframe(msg["table"], width="stretch")
 
                 # ── Agent Activity Trace (Observability) ─────────────
                 if msg.get("trace"):
@@ -1145,7 +1152,7 @@ else:
             infographic_col1, infographic_col2 = st.columns([1, 1])
             with infographic_col1:
                 if st.button("📄 Generate Infographic", key="gen_infographic",
-                             use_container_width=True, type="secondary"):
+                             width="stretch", type="secondary"):
                     st.toast("📡 Contacting agent for summary...", icon="🤖")
                     with st.spinner("🎨 Agent is summarizing your dashboard..."):
                         if _generate_infographic():
@@ -1159,7 +1166,7 @@ else:
                         file_name=f"dataverse_infographic_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
                         mime="application/pdf",
                         key="dl_infographic",
-                        use_container_width=True,
+                        width="stretch",
                         type="primary",
                     )
             
@@ -1184,7 +1191,7 @@ else:
                     with st.container(border=True):
                         if item["type"] == "figure":
                             try:
-                                st.pyplot(item["figure"], use_container_width=True)
+                                st.pyplot(item["figure"], width="stretch")
                             except Exception as e:
                                 st.error(f"⚠️ Could not render pinned visual: {e}")
                             if item.get("insight"):

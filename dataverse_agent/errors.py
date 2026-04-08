@@ -28,8 +28,6 @@ class MitigationManager:
 
     SUGGESTED_ACTIONS = [
         "Refresh the page and try your request again.",
-        "Wait a minute for the system to stabilize before retrying.",
-        "Try rephrasing your question or simplifying the visualization request.",
         "If the issue persists, please reach out to the project creator."
     ]
 
