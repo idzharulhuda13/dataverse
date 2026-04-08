@@ -97,12 +97,25 @@ def _render_activity_trace(trace: list):
                 code = args.get("code") or args.get("python_code") or args.get("script")
                 if code:
                     st.code(code, language="python")
-                else:
-                    st.json(args)
-            
-            st.divider()
-            
 
+def _render_error_mitigation(guidance_json: str):
+    """Renders a friendly error message and a technical expander."""
+    import json
+    try:
+        data = json.loads(guidance_json)
+        st.error(f"⚠️ {data['friendly_message']}")
+        
+        cols = st.columns(2)
+        with cols[0]:
+            st.markdown("**Suggested Actions:**")
+            for action in data["suggested_actions"]:
+                st.markdown(f"- {action}")
+        
+        if st.session_state.get("show_observability") and data.get("technical_details"):
+            with st.expander("🛠️ Technical Details (Debug)", expanded=False):
+                st.code(data["technical_details"], language="python")
+    except Exception:
+        st.error("⚠️ An unexpected error occurred during analysis.")
 
 def _load_session(sid):
     """Load a session's state into the working session_state keys."""
@@ -485,7 +498,31 @@ def _run_agent_and_save(llm_prompt: str, user_display_text: str | None = None):
         
         return final_text
 
+    # --- Phase 1: Initial Attempt ---
     response_text = asyncio.run(generate_response())
+    
+    # Check for trapped tool errors
+    if "ERROR_MITIGATION_TRIGGERED:" in response_text:
+        st.session_state.usage.record_error()
+        st.session_state.usage.record_retry()
+        
+        # Trigger SILENT RETRY
+        retry_prompt = (
+            f"The previous attempt failed with an internal error. "
+            f"Please review the error details below, fix your code (e.g., check column names or types), "
+            f"and try your analysis again:\n\n{response_text}"
+        )
+        
+        if st.session_state.get("show_observability"):
+             st.session_state.usage.record_trace(
+                event_type="retry",
+                agent_name="orchestrator",
+                detail="Detection: Tool error. Initiating silent self-healing retry..."
+            )
+            
+        # Re-run the agent with the retry instruction
+        response_text = asyncio.run(generate_response())
+
     response_without_code = extract_non_code_text(response_text)
 
     # Retrieve generated figures and original data summary from the session context
@@ -586,6 +623,13 @@ def _run_agent_and_save(llm_prompt: str, user_display_text: str | None = None):
         "role": "assistant",
         "content": response_without_code,
     }
+    
+    # If the final response still contains an error, flag it for UI mitigation
+    if "ERROR_MITIGATION_TRIGGERED:" in response_text:
+        assistant_msg["mitigation_error"] = response_text.split("ERROR_MITIGATION_TRIGGERED:")[1].strip()
+        # Fallback: if chart failed, check if we have a table to show instead
+        if display_df is None and figure is None:
+             assistant_msg["content"] = "I was unable to complete the specific visualization requested, but I can provide a data summary instead if you'd like."
     if figure is not None:
         assistant_msg["figure"] = figure
     if insight_text is not None:
@@ -868,6 +912,10 @@ else:
                 # Show enriched query subtitle for user messages
                 if msg.get("enriched_query"):
                     st.caption(f"✨ Enriched: {msg['enriched_query']}")
+
+                # Error Mitigation UI
+                if msg.get("mitigation_error"):
+                    _render_error_mitigation(msg["mitigation_error"])
 
                 # Show output string from code execution
                 if "output" in msg:
