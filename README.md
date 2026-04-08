@@ -1,6 +1,6 @@
 <p align="center"><h1 align="center">DATAVERSE</h1></p>
 <p align="center">
-	<em><code>❯ Chat with Your CSV.</code></em>
+	<em><code>❯ Chat with Your Data.</code></em>
 </p>
 <p align="center">
   <a href="https://dataverse-appv2.streamlit.app/" target="_blank">
