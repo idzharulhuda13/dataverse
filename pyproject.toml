@@ -17,6 +17,7 @@ dependencies = [
     "reportlab>=4.4.10",
     "seaborn>=0.13.2",
     "streamlit>=1.55.0",
+    "pydantic>=2.0",
 ]
 
 [dependency-groups]
