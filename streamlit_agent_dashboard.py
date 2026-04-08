@@ -49,7 +49,7 @@ def _create_session(name=None):
         "modified_df": None,
         "previous_df": None,
         "dashboard_items": [],
-        "usage": SessionUsage(sid),
+        "usage": SessionUsage(session_id=sid),
     }
     return sid
 
@@ -112,7 +112,7 @@ def _load_session(sid):
     st.session_state.modified_df = session["modified_df"]
     st.session_state.previous_df = session.get("previous_df")
     st.session_state.dashboard_items = session["dashboard_items"]
-    st.session_state.usage = session.get("usage", SessionUsage(sid))
+    st.session_state.usage = session.get("usage", SessionUsage(session_id=sid))
 
 
 def _switch_session(sid):
@@ -317,7 +317,7 @@ with st.sidebar:
                             st.rerun()
 
     # ── Usage & Progress ──────────────────────────────────────────────────
-    usage = st.session_state.get('usage', SessionUsage(current_sid))
+    usage = st.session_state.get('usage', SessionUsage(session_id=current_sid))
     max_turns = st.session_state.max_budget_turns
     used_turns = usage.turns
     remaining_turns = max(0, max_turns - used_turns)
@@ -665,32 +665,32 @@ if st.session_state.enterprise_mode and st.session_state.modified_df is None:
         _current_sid = st.session_state.current_session_id
 
         # ── Featured card: mrt_sales (full-width) ─────────────────────────
-        _feat = next(t for t in _tables if t["table_id"] == "mrt_sales")
+        _feat = next(t for t in _tables if t.table_id == "mrt_sales")
         with st.container(border=True):
             _fc1, _fc2, _fc3 = st.columns([1, 5, 2])
             with _fc1:
                 st.markdown(
-                    f"<div style='font-size:2.5rem; text-align:center; padding-top:0.5rem'>{_feat['icon']}</div>",
+                    f"<div style='font-size:2.5rem; text-align:center; padding-top:0.5rem'>{_feat.icon}</div>",
                     unsafe_allow_html=True,
                 )
             with _fc2:
-                st.markdown(f"**{_feat['display_name']}** ⭐ *Featured*")
-                st.caption(_feat["description"])
+                st.markdown(f"**{_feat.display_name}** ⭐ *Featured*")
+                st.caption(_feat.description)
                 st.caption(
-                    f"📐 {_feat['grain']} · ~{_feat['approx_rows']} rows · {_feat['columns']} columns"
+                    f"📐 {_feat.grain} · ~{_feat.approx_rows} rows · {_feat.columns} columns"
                 )
             with _fc3:
                 if st.button("Load →", key="load_mrt_sales", type="primary", use_container_width=True):
-                    st.session_state.enterprise_table_id = _feat["table_id"]
-                    st.session_state.enterprise_dataset_name = _feat["display_name"]
-                    st.session_state.sessions[_current_sid]["name"] = f"🏢 {_feat['display_name']}"
-                    with st.spinner(f"Loading {_feat['display_name']}…"):
-                        _df = load_table(_feat["table_id"])
+                    st.session_state.enterprise_table_id = _feat.table_id
+                    st.session_state.enterprise_dataset_name = _feat.display_name
+                    st.session_state.sessions[_current_sid]["name"] = f"🏢 {_feat.display_name}"
+                    with st.spinner(f"Loading {_feat.display_name}…"):
+                        _df = load_table(_feat.table_id)
                     st.session_state.modified_df = _df.copy()
                     st.session_state.original_df = _df.copy()
                     _auto = (
                         "[AUTO-ANALYSIS]\n\n"
-                        f"[System Context]: The dataset is '{_feat['display_name']}' from the "
+                        f"[System Context]: The dataset is '{_feat.display_name}' from the "
                         "DataVerse warehouse (pre-cleaned and validated by dbt). "
                         "Recommend 5 specific insights or analyses the user could explore. "
                         "Do NOT create any charts yet."
@@ -702,29 +702,29 @@ if st.session_state.enterprise_mode and st.session_state.modified_df is None:
         st.markdown("")
 
         # ── Remaining 4 tables in 2-column grid ───────────────────────────
-        _other = [t for t in _tables if t["table_id"] != "mrt_sales"]
+        _other = [t for t in _tables if t.table_id != "mrt_sales"]
         _col_l, _col_r = st.columns(2)
         for _i, _tbl in enumerate(_other):
             with (_col_l if _i % 2 == 0 else _col_r):
                 with st.container(border=True):
                     st.markdown(
-                        f"<div style='font-size:1.8rem; text-align:center'>{_tbl['icon']}</div>",
+                        f"<div style='font-size:1.8rem; text-align:center'>{_tbl.icon}</div>",
                         unsafe_allow_html=True,
                     )
-                    st.markdown(f"**{_tbl['display_name']}**")
-                    st.caption(_tbl["description"])
-                    st.caption(f"~{_tbl['approx_rows']} rows · {_tbl['columns']} cols")
-                    if st.button("Load →", key=f"load_{_tbl['table_id']}", use_container_width=True):
-                        st.session_state.enterprise_table_id = _tbl["table_id"]
-                        st.session_state.enterprise_dataset_name = _tbl["display_name"]
-                        st.session_state.sessions[_current_sid]["name"] = f"🏢 {_tbl['display_name']}"
-                        with st.spinner(f"Loading {_tbl['display_name']}…"):
-                            _df = load_table(_tbl["table_id"])
+                    st.markdown(f"**{_tbl.display_name}**")
+                    st.caption(_tbl.description)
+                    st.caption(f"~{_tbl.approx_rows} rows · {_tbl.columns} cols")
+                    if st.button("Load →", key=f"load_{_tbl.table_id}", use_container_width=True):
+                        st.session_state.enterprise_table_id = _tbl.table_id
+                        st.session_state.enterprise_dataset_name = _tbl.display_name
+                        st.session_state.sessions[_current_sid]["name"] = f"🏢 {_tbl.display_name}"
+                        with st.spinner(f"Loading {_tbl.display_name}…"):
+                            _df = load_table(_tbl.table_id)
                         st.session_state.modified_df = _df.copy()
                         st.session_state.original_df = _df.copy()
                         _auto = (
                             "[AUTO-ANALYSIS]\n\n"
-                            f"[System Context]: The dataset is '{_tbl['display_name']}' from the "
+                            f"[System Context]: The dataset is '{_tbl.display_name}' from the "
                             "DataVerse warehouse (pre-cleaned and validated by dbt). "
                             "Recommend 5 specific insights or analyses the user could explore. "
                             "Do NOT create any charts yet."
@@ -786,13 +786,13 @@ if st.session_state.modified_df is None:
                     if not st.button("✅ Load selected sheet", key="hero_load_sheet", type="primary"):
                         st.stop()  # wait for user to confirm sheet selection
 
-            df, error = load_dataframe(uploaded_file, sheet_name=selected_sheet)
-            if error:
-                st.error(f"⚠️ Error loading file: {error}")
+            load_result = load_dataframe(uploaded_file, sheet_name=selected_sheet)
+            if load_result.error:
+                st.error(f"⚠️ Error loading file: {load_result.error}")
             else:
-                st.session_state.modified_df = df.copy()
+                st.session_state.modified_df = load_result.df.copy()
                 # Immutable backup — never overwritten, used as a restore point
-                st.session_state.original_df = df.copy()
+                st.session_state.original_df = load_result.df.copy()
 
                 # Automatically rename session to filename
                 current_sid = st.session_state.current_session_id
@@ -958,11 +958,11 @@ else:
             # Handle new file uploads (re-upload mid-session)
             if uploaded_files:
                 uploaded_file = uploaded_files[0]
-                df, error = load_dataframe(uploaded_file)
-                if error:
-                    st.error(f"⚠️ Error loading file: {error}")
+                load_result = load_dataframe(uploaded_file)
+                if load_result.error:
+                    st.error(f"⚠️ Error loading file: {load_result.error}")
                 else:
-                    st.session_state.modified_df = df.copy()
+                    st.session_state.modified_df = load_result.df.copy()
                     
                     # Automatically rename session to new filename
                     current_sid = st.session_state.current_session_id
@@ -974,13 +974,14 @@ else:
                     df_head = st.session_state.modified_df.head(10).to_string()  # type: ignore
 
             # ── Handle Slash Commands ──────────────────────────────
-            is_cmd, response = handle_slash_command(user_text, st.session_state.modified_df, st.session_state.usage)
-            if is_cmd:
-                if isinstance(response, str):
+            slash_result = handle_slash_command(user_text, st.session_state.modified_df, st.session_state.usage)
+            if slash_result.handled:
+                if slash_result.text is not None:
                     st.session_state.messages.append({"role": "user", "content": user_text})
-                    st.session_state.messages.append({"role": "assistant", "content": response})
-                elif isinstance(response, dict):
-                    action = response.get("action")
+                    st.session_state.messages.append({"role": "assistant", "content": slash_result.text})
+                elif slash_result.action is not None:
+                    action = slash_result.action.action
+                    args = slash_result.action.args
                     if action == "clear":
                         st.session_state.messages = []
                     elif action == "undo":
@@ -1008,10 +1009,10 @@ else:
                     elif action == "export":
                         st.session_state.messages.append({"role": "user", "content": user_text})
                         st.session_state.messages.append({
-                            "role": "assistant", 
-                            "content": "Prepare download...", 
+                            "role": "assistant",
+                            "content": "Prepare download...",
                             "action": "export",
-                            "args": response.get("args")
+                            "args": args,
                         })
                     elif action == "infographic":
                         st.session_state.messages.append({"role": "user", "content": user_text})
@@ -1026,7 +1027,7 @@ else:
                                 "role": "assistant",
                                 "content": "⚠️ No pinned charts found. Pin some visualizations first, then try `/infographic` again.",
                             })
-                
+
                 _save_current_session()
                 st.rerun()
 
@@ -1042,13 +1043,14 @@ else:
                 with st.spinner("Enriching question..."):
                     try:
                         # Pass last 5 messages for context + dataset name in enterprise mode
-                        enriched_question, usage = enrich_query(
+                        enrich_result = enrich_query(
                             user_text,
                             st.session_state.modified_df,
                             chat_history=st.session_state.messages[-5:],
                             dataset_name=st.session_state.get("enterprise_dataset_name"),
                         )
-                        st.session_state.usage.record_api_call(usage)
+                        enriched_question = enrich_result.enriched_query
+                        st.session_state.usage.record_api_call(enrich_result.usage)
                     except Exception:
                         enriched_question = user_text  # graceful fallback to raw query
 
