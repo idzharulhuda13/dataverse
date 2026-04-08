@@ -499,29 +499,36 @@ def _run_agent_and_save(llm_prompt: str, user_display_text: str | None = None):
         return final_text
 
     # --- Phase 1: Initial Attempt ---
-    response_text = asyncio.run(generate_response())
-    
-    # Check for trapped tool errors
-    if "ERROR_MITIGATION_TRIGGERED:" in response_text:
-        st.session_state.usage.record_error()
-        st.session_state.usage.record_retry()
+    try:
+        response_text = asyncio.run(generate_response())
         
-        # Trigger SILENT RETRY
-        retry_prompt = (
-            f"The previous attempt failed with an internal error. "
-            f"Please review the error details below, fix your code (e.g., check column names or types), "
-            f"and try your analysis again:\n\n{response_text}"
-        )
-        
-        if st.session_state.get("show_observability"):
-             st.session_state.usage.record_trace(
-                event_type="retry",
-                agent_name="orchestrator",
-                detail="Detection: Tool error. Initiating silent self-healing retry..."
+        # Check for trapped tool errors
+        if "ERROR_MITIGATION_TRIGGERED:" in response_text:
+            st.session_state.usage.record_error()
+            st.session_state.usage.record_retry()
+            
+            # Trigger SILENT RETRY
+            retry_prompt = (
+                f"The previous attempt failed with an internal error. "
+                f"Please review the error details below, fix your code (e.g., check column names or types), "
+                f"and try your analysis again:\n\n{response_text}"
             )
             
-        # Re-run the agent with the retry instruction
-        response_text = asyncio.run(generate_response())
+            if st.session_state.get("show_observability"):
+                 st.session_state.usage.record_trace(
+                    event_type="retry",
+                    agent_name="orchestrator",
+                    detail="Detection: Tool error. Initiating silent self-healing retry..."
+                )
+                
+            # Re-run the agent with the retry instruction
+            response_text = asyncio.run(generate_response())
+    except Exception as e:
+        from dataverse_agent.errors import MitigationManager
+        MitigationManager.log_technical_error(e, context="Agent.TurnLoop")
+        st.session_state.usage.record_error()
+        guidance = MitigationManager.get_guidance(e)
+        response_text = f"ERROR_MITIGATION_TRIGGERED: {guidance.model_dump_json()}"
 
     response_without_code = extract_non_code_text(response_text)
 
@@ -609,7 +616,12 @@ def _run_agent_and_save(llm_prompt: str, user_display_text: str | None = None):
                                 text += p.text
                 return text
 
-            insight_text = extract_non_code_text(asyncio.run(generate_insight()))
+            try:
+                insight_text = extract_non_code_text(asyncio.run(generate_insight()))
+            except Exception as e:
+                from dataverse_agent.errors import MitigationManager
+                MitigationManager.log_technical_error(e, context="Agent.VisionInsight")
+                insight_text = None # Silence vision errors; the figure will still show
 
             if st.session_state.get("show_observability"):
                 st.session_state.usage.record_trace(

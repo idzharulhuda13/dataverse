@@ -20,6 +20,9 @@ class MitigationManager:
         "SyntaxError": "There was a small logic issue while preparing the analysis.",
         "EmptyDataError": "The dataset or the specific slice I was looking at appears to be empty.",
         "AttributeError": "I encountered an unexpected data structure while performing the analysis.",
+        "ServerError": "The AI engine is currently experiencing high demand or is temporarily unavailable.",
+        "ClientError": "There was an issue with the request sent to the AI engine.",
+        "APIError": "A general connection issue occurred with the AI service.",
         "Exception": "An unexpected issue occurred during the analysis phase."
     }
 
