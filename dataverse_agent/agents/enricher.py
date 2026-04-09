@@ -61,12 +61,27 @@ def enrich_query(
     df.info(buf=buf)
     df_context = f"Columns & types:\n{buf.getvalue()}\n\nSample (first 5 rows):\n{df.head(5).to_string()}"
 
+    # Build statistical grounding context
+    stats = []
+    for col in df.columns:
+        nu = df[col].nunique()
+        if pd.api.types.is_numeric_dtype(df[col]):
+            mi, ma = df[col].min(), df[col].max()
+            stats.append(f"- {col}: {nu} unique values | range: [{mi}, {ma}]")
+        elif pd.api.types.is_datetime64_any_dtype(df[col]):
+            mi, ma = df[col].min(), df[col].max()
+            stats.append(f"- {col}: {nu} unique values | range: [{mi}, {ma}]")
+        else:
+            stats.append(f"- {col}: {nu} unique values")
+    grounding_context = "Statistical Grounding:\n" + "\n".join(stats)
+
     dataset_label = f"Dataset name: {dataset_name}\n" if dataset_name else ""
     user_prompt = (
         f"{history_context}"
         f"Raw user query: {user_text}\n\n"
         f"{dataset_label}"
-        f"Dataset:\n{df_context}"
+        f"Dataset:\n{df_context}\n\n"
+        f"{grounding_context}"
     )
 
     response = _get_client().models.generate_content(

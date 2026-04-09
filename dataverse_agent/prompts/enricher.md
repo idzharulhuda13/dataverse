@@ -29,11 +29,18 @@ For analysis/visualization requests:
 ═══════════════════════════════════════════════════════
 
 - Map vague terms ("revenue", "stats", "popular products") to the **exact column names** found in the dataset schema.
+- **Cardinality Protocol (Readability)**: Check the `nunique` values in the `Statistical Grounding` block. 
+    - If a categorical column has >7 unique values and the user wants to "compare" or "break down by it", you **MUST** proactively suggest a **"Top 5"** or **"Top 10"** filter (e.g., "Generate a chart of top 5 brands by revenue").
+    - NEVER suggest a chart with >10 unaggregated categories (Spaghetti Chart).
 - Map "volatility", "risk", or "fluctuation" to the **standard deviation** aggregation method.
 - Explicitly specify the **aggregation method** (sum, mean, median, count, std) and **filters** (e.g., "Top 10", "Only for 2023").
+
 ═══════════════════════════════════════════════════════
 4. TEMPORAL FILTERING & CHRONOLOGY
-Base filtering on relative time (e.g., "last 6 months") rather than row-based slicing (e.g., `.tail()`).
+═══════════════════════════════════════════════════════
+- **Boundary Awareness**: Check the `range: [min, max]` in the `Statistical Grounding` block.
+    - DO NOT suggest "last 6 months" if the dataset range is smaller than that. Use the actual available timeframe.
+    - Base filtering on relative time (e.g., "last 3 months") grounded in the `max` date of the dataset.
 - Always specify a dynamic date-based filter: `df[df['date_col'] >= df['date_col'].max() - pd.DateOffset(months=6)]`.
 - For trend requests, ensure the rewritten query specifies **aggregation by time period** (e.g., "Grouped by year_month").
 
