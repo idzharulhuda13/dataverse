@@ -65,7 +65,7 @@ class StressTestConfig:
     skip_cleaning: bool = True  # Set to False if you want to run the cleaning agent by default
 
     # API & Rate Limiting
-    inter_question_delay: int = 15  # seconds
+    inter_question_delay: int = 5  # seconds
     max_retries: int = 3
     retry_base_delay: int = 45  # seconds
 
@@ -93,34 +93,34 @@ class TestQuestion:
 # Default questions targeting the Chocolate Sales (mrt_sales) dataset
 STRESS_TEST_QUESTIONS: list[TestQuestion] = [
     TestQuestion(
-        id="Q1",
-        question="Bubble Analysis: Compare brands by total revenue (x) and total profit (y), using the number of orders (count) as the bubble size.",
+        id="H1",
+        question="Statistical Outliers: Identify store locations where the average profit margin is more than 2 standard deviations away from the global mean. Visualize these outliers in a scatter plot and label the specific store names.",
         expected_chart_type="scatter",
         checks=["chart_generated", "dataset_intact"],
     ),
     TestQuestion(
-        id="Q2",
-        question="Sensitivity Analysis: Show a scatter plot of unit_price vs quantity and include a regression trend line to visualize price elasticity.",
-        expected_chart_type="scatter",
+        id="H2",
+        question="Weighted Metrics: Create a comparison of 'Loyalty-Adjusted Revenue' (Revenue * 1.2 for Loyalty Members, 1.0 for others) versus raw revenue across different store types. Display the results in a grouped bar chart.",
+        expected_chart_type="bar",
         checks=["chart_generated", "dataset_intact"],
     ),
     TestQuestion(
-        id="Q3",
-        question="Efficiency Matrix: Generate a quadrant analysis of cities comparing 'mean profit margin' vs 'total orders'. Add dashed reference lines at the mean for both axes.",
-        expected_chart_type="scatter",
-        checks=["chart_generated", "dataset_intact"],
-    ),
-    TestQuestion(
-        id="Q4",
-        question="Growth Trajectory: Show the monthly revenue trend for the last 6 months and include a trend line to identify the overall growth direction.",
+        id="H3",
+        question="What-If Scenario: Forecast the total revenue for the next 3 months. In the same visualization, include a 'What-If' scenario line that assumes a 10% reduction in total purchase quantity due to supply shifts.",
         expected_chart_type="line",
         checks=["chart_generated", "dataset_intact"],
     ),
     TestQuestion(
-        id="Q5",
-        question="Brand Leaderboard: Show a bar chart of the top 10 brands by total revenue. Use 'sum' as the estimator.",
+        id="H4",
+        question="Binned Correlation: Analyze the relationship between customer_age and revenue_per_unit by grouping customers into 10-year age buckets. Plot the average transaction value on the primary axis and the count of unique orders on the secondary axis.",
         expected_chart_type="bar",
-        checks=["chart_generated", "dataset_intact", "bar_labels_valid"],
+        checks=["chart_generated", "dataset_intact"],
+    ),
+    TestQuestion(
+        id="H5",
+        question="Compositional Drift: Visualize how the brand-level revenue share has shifted between the first half (H1) and second half (H2) of the year. Use a slope chart to track the change for the top 5 brands.",
+        expected_chart_type="slope",
+        checks=["chart_generated", "dataset_intact"],
     ),
 ]
 
@@ -417,7 +417,8 @@ class StressTestRunner:
             print(f"   ✨ Enriching query...")
             from dataverse_agent.agents.enricher import enrich_query
             try:
-                enriched_question, _usage = enrich_query(question.question, self.working_df)
+                enrich_result = enrich_query(question.question, self.working_df)
+                enriched_question = enrich_result.enriched_query
                 result.enriched_question = enriched_question
                 print(f"      Enriched: {enriched_question}")
             except Exception as e:
