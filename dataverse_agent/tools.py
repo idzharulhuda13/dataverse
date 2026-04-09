@@ -354,8 +354,14 @@ def create_visualization(chart_type: str, x_column: str, y_column: str = None, y
             if show_trend:
                 if pd.api.types.is_numeric_dtype(df[x_column]):
                     sns.regplot(data=df, x=x_column, y=y_column, scatter=False, ax=ax, color=ACCENT, line_kws={"linestyle": "--", "alpha": 0.6})
+                elif pd.api.types.is_datetime64_any_dtype(df[x_column]):
+                    # For datetime X, convert to matplotlib numeric dates to align with axis units
+                    import matplotlib.dates as mdates
+                    df_temp = df.copy()
+                    df_temp['x_num_tmp'] = mdates.date2num(df_temp[x_column])
+                    sns.regplot(data=df_temp, x='x_num_tmp', y=y_column, scatter=False, ax=ax, color=ACCENT, line_kws={"linestyle": "--", "alpha": 0.6})
                 else:
-                    # For categorical X (like year_month), map to numeric indices for regression
+                    # For categorical X (like brand), map to ordinal numeric indices for regression
                     x_idx = sorted(df[x_column].unique())
                     x_map = {val: i for i, val in enumerate(x_idx)}
                     df_temp = df.copy()
