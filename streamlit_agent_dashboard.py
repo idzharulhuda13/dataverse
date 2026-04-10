@@ -12,7 +12,9 @@ from google import genai
 from google.genai import types
 
 from models.utils import load_dataframe, get_excel_sheet_names, extract_non_code_text, SUPPORTED_EXTENSIONS
-from models.duckdb_connector import list_tables, load_table
+from models.connectors import BaseConnector, get_active_connector
+from models.duckdb_connector import DuckDBConnector
+from models.bigquery_connector import BigQueryConnector
 from dataverse_agent.agent import root_agent
 from dataverse_agent.agents.enricher import enrich_query
 from dataverse_agent.tools import set_session_context, get_session_figures, get_final_df, get_display_df
@@ -175,10 +177,10 @@ for key, default in [
     ("enterprise_mode", False),   # seeded from file-level constant
     ("enterprise_table_id", None),
     ("enterprise_dataset_name", None),
+    ("connector_type", "duckdb"), # "duckdb" | "bigquery"
 ]:
     if key not in st.session_state:
         st.session_state[key] = default
-
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # 2. SIDEBAR – SESSION MANAGER
@@ -405,6 +407,26 @@ with st.sidebar:
         value=st.session_state.get("enterprise_mode", False),
         help="Replace file upload with the DataVerse warehouse table picker."
     )
+
+    if st.session_state.enterprise_mode:
+        st.markdown("### 🔌 Database Engine")
+        connector_options = {
+            "duckdb": "🦆 DuckDB (Local Warehouse)",
+            "bigquery": "☁️ Google BigQuery (Cloud)"
+        }
+        selected_type = st.selectbox(
+            "Select Warehouse Type",
+            options=list(connector_options.keys()),
+            format_func=lambda x: connector_options[x],
+            index=0 if st.session_state.connector_type == "duckdb" else 1,
+            key="connector_type_selector"
+        )
+        if selected_type != st.session_state.connector_type:
+            st.session_state.connector_type = selected_type
+            # Clear current df to force reload with new connector
+            st.session_state.modified_df = None
+            st.session_state.enterprise_table_id = None
+            st.rerun()
     
     st.divider()
 
@@ -723,48 +745,52 @@ if st.session_state.enterprise_mode and st.session_state.modified_df is None:
             unsafe_allow_html=True,
         )
 
-        _tables = list_tables()
+        connector = get_active_connector()
+        _tables = connector.list_tables()
         _current_sid = st.session_state.current_session_id
 
         # ── Featured card: mrt_sales (full-width) ─────────────────────────
-        _feat = next(t for t in _tables if t.table_id == "mrt_sales")
-        with st.container(border=True):
-            _fc1, _fc2, _fc3 = st.columns([1, 5, 2])
-            with _fc1:
-                st.markdown(
-                    f"<div style='font-size:2.5rem; text-align:center; padding-top:0.5rem'>{_feat.icon}</div>",
-                    unsafe_allow_html=True,
-                )
-            with _fc2:
-                st.markdown(f"**{_feat.display_name}** ⭐ *Featured*")
-                st.caption(_feat.description)
-                st.caption(
-                    f"📐 {_feat.grain} · ~{_feat.approx_rows} rows · {_feat.columns} columns"
-                )
-            with _fc3:
-                if st.button("Load →", key="load_mrt_sales", type="primary", width="stretch"):
-                    st.session_state.enterprise_table_id = _feat.table_id
-                    st.session_state.enterprise_dataset_name = _feat.display_name
-                    st.session_state.sessions[_current_sid]["name"] = f"🏢 {_feat.display_name}"
-                    with st.spinner(f"Loading {_feat.display_name}…"):
-                        _df = load_table(_feat.table_id)
-                    st.session_state.modified_df = _df.copy()
-                    st.session_state.original_df = _df.copy()
-                    _auto = (
-                        "[AUTO-ANALYSIS]\n\n"
-                        f"[System Context]: The dataset is '{_feat.display_name}' from the "
-                        "DataVerse warehouse (pre-cleaned and validated by dbt). "
-                        "Recommend 5 specific insights or analyses the user could explore. "
-                        "Do NOT create any charts yet."
+        _feat = next((t for t in _tables if t.table_id == "mrt_sales"), _tables[0] if _tables else None)
+        
+        if _feat:
+            with st.container(border=True):
+                _fc1, _fc2, _fc3 = st.columns([1, 5, 2])
+                with _fc1:
+                    st.markdown(
+                        f"<div style='font-size:2.5rem; text-align:center; padding-top:0.5rem'>{_feat.icon}</div>",
+                        unsafe_allow_html=True,
                     )
-                    with st.spinner("Generating analysis recommendations…"):
-                        _run_agent_and_save(_auto)
-                    st.rerun()
+                with _fc2:
+                    st.markdown(f"**{_feat.display_name}** ⭐ *Featured*")
+                    st.caption(_feat.description)
+                    st.caption(
+                        f"📐 {_feat.grain} · ~{_feat.approx_rows} rows · {_feat.columns} columns"
+                    )
+                with _fc3:
+                    if st.button("Load →", key=f"load_feat_{_feat.table_id}", type="primary", width="stretch"):
+                        st.session_state.enterprise_table_id = _feat.table_id
+                        st.session_state.enterprise_dataset_name = _feat.display_name
+                        st.session_state.sessions[_current_sid]["name"] = f"🏢 {_feat.display_name}"
+                        with st.spinner(f"Loading {_feat.display_name}…"):
+                            _df = connector.load_table(_feat.table_id)
+                        st.session_state.modified_df = _df.copy()
+                        st.session_state.original_df = _df.copy()
+                        _auto = (
+                            "[AUTO-ANALYSIS]\n\n"
+                            f"[System Context]: The dataset is '{_feat.display_name}' from the "
+                            "DataVerse warehouse (pre-cleaned and validated by dbt). "
+                            "Recommend 5 specific insights or analyses the user could explore. "
+                            "Do NOT create any charts yet."
+                        )
+                        with st.spinner("Generating analysis recommendations…"):
+                            _run_agent_and_save(_auto)
+                        st.rerun()
 
         st.markdown("")
 
-        # ── Remaining 4 tables in 2-column grid ───────────────────────────
-        _other = [t for t in _tables if t.table_id != "mrt_sales"]
+        # ── Remaining tables in 2-column grid ─────────────────────────────
+        _feat_id = _feat.table_id if _feat else None
+        _other = [t for t in _tables if t.table_id != _feat_id]
         _col_l, _col_r = st.columns(2)
         for _i, _tbl in enumerate(_other):
             with (_col_l if _i % 2 == 0 else _col_r):
@@ -781,7 +807,7 @@ if st.session_state.enterprise_mode and st.session_state.modified_df is None:
                         st.session_state.enterprise_dataset_name = _tbl.display_name
                         st.session_state.sessions[_current_sid]["name"] = f"🏢 {_tbl.display_name}"
                         with st.spinner(f"Loading {_tbl.display_name}…"):
-                            _df = load_table(_tbl.table_id)
+                            _df = connector.load_table(_tbl.table_id)
                         st.session_state.modified_df = _df.copy()
                         st.session_state.original_df = _df.copy()
                         _auto = (
