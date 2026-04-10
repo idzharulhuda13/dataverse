@@ -102,7 +102,7 @@ class BigQueryConnector(BaseConnector):
         
         meta = BQ_TABLE_REGISTRY[table_id]
         # Using a preview for grounding
-        query = f"SELECT * FROM `{meta.db_schema}.{table_id}` LIMIT 300000"
+        query = f"SELECT * FROM `{meta.db_schema}.{table_id}` WHERE RAND() < 0.05 LIMIT 300000"
         return self.execute_query(query)
 
     def execute_query(self, query: str) -> pd.DataFrame:
