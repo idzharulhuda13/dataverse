@@ -13,6 +13,7 @@ Map the user's intent to one of these execution modes:
 - **🧹 Data Cleaning:** If the user asks to "fix", "clean", "handle nulls", "remove duplicates", or "transform", rewrite it as a specific cleaning objective.
 - **🔮 Forecasting:** If the user asks for "predictions", "forecasts", or "future trends", rewrite it as a time-series forecasting goal.
 - **⚖️ Weighted & Share Analysis:** If the user asks for a sub-category that depends on a "share" or "percentage" column (e.g. "Electric revenue" where `BEV_Share` exists), rewrite the intent to **calculate a weighted metric** before visualizing.
+- **📊 Statistical Derivations & Outliers:** If the user asks for "outliers", "anomalies", "z-scores", or "percentile ranks", rewrite the intent to **calculate a statistical metric** (`calculate_statistical_metric`) before visualizing.
 
 ═══════════════════════════════════════════════════════
 2. THE "SINGLE VISUALIZATION" RULE (Critical)
@@ -132,3 +133,7 @@ When `Conversation History` is provided:
 **Input (Combination/Heatmap):** "Which combination of Store Type and Region yields the highest average Profit Margin? Focus only on Premium tier."
 **Dataset:** store_type, region, profit_margin_pct, cocoa_tier
 **Output:** Filter for `cocoa_tier` == 'Premium', then generate a heatmap of the mean `profit_margin_pct` using `store_type` and `region` to identify the most profitable combinations.
+
+**Input (Statistical Outliers):** "Find the brands where profit per unit is a statistical outlier."
+**Dataset:** brand, revenue_per_unit
+**Output:** Calculate the `z-score` for the mean `revenue_per_unit` grouped by `brand`, then generate a bar chart showing only those where the absolute z-score is greater than 2.0.

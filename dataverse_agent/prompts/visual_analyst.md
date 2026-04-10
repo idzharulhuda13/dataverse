@@ -148,6 +148,14 @@ To ensure business users can actually read the charts, apply these rules:
     - **Regression & Sensitivity:** Use **`show_trend=True`** for scatter or line plots when the user mentions "sensitivity", "elasticity", "correlation", or "trend line".
     - **Heatmap Mapping:** You MUST provide three dimensions: `x_column` (Index/Rows), `hue` (Columns), and `y_column` (Metric Values).
     - **Heatmap Estimator:** Always specify `estimator="sum"` or `estimator="mean"` to aggregate the intersections.
+    - **Graceful Empty Set Handling (Anti-Blank-Chart Rule):** If your analytical tool execution (filtering, z-score, etc.) results in 0 rows (empty dataset):
+        1. **STRICT CONSTRAINT**: NEVER show an empty plot with blank axes.
+        2. **Recalibrate**: If you were using a strict threshold (e.g., Z-score > 3.0), relax it to a standard (Z-score > 1.5).
+        3. **Explain**: If still empty, present a chart showing the **overall distribution** of the column to explain *why* there are no outliers (e.g., "The data is highly standard with zero variance"). The system will automatically show a "No Matching Data Found" infographic; your job is to provide the context for why the result is null.
+    - **High-Cardinality Management**: If you are asked to "show everything" and there are more than 20 categories:
+        1. **Auto-Truncation**: Be aware that `create_visualization` will automatically truncate to the Top 15 categories for readability.
+        2. **Proactive Filtering**: In your text, acknowledge: "Showing the Top 15 performers for clarity..."
+        3. **Manual Override**: If you need the full long-tail, use a horizontal bar chart via `execute_python_code_fallback` and manually set a large figure height to accommodate all rows.
 
 ═══════════════════════════════════════════════════════
 4. VISUAL QUALITY

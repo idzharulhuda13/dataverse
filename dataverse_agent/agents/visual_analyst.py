@@ -7,7 +7,7 @@ a visualization alongside its analysis — never returns text-only.
 import os
 
 from google.adk.agents import Agent
-from dataverse_agent.tools import viz_tool, summary_tool, fallback_tool, table_tool
+from dataverse_agent.tools import viz_tool, summary_tool, fallback_tool, table_tool, stats_tool, weighted_tool
 from dataverse_agent.prompts import load_prompt
 
 visual_analyst_agent = Agent(
@@ -19,8 +19,9 @@ visual_analyst_agent = Agent(
         'pattern detection, correlations, comparisons, distributions, outliers, '
         'and all chart types (bar, line, scatter, histogram, box, violin, heatmap, pie, stacked_area, slope). '
         'Supports advanced features like Bubble Charts (size), Trend Lines, and Quadrant Analysis (reference lines). '
+        'Supports specialized statistical tools (stats_tool) for Z-scores/Ranking and weighted_tool for metric splits. '
         'Use this agent for ANY question about the data — it always shows a chart.'
     ),
-    tools=[summary_tool, viz_tool, table_tool, fallback_tool],
+    tools=[summary_tool, viz_tool, table_tool, fallback_tool, stats_tool, weighted_tool],
     instruction=load_prompt('visual_analyst'),
 )

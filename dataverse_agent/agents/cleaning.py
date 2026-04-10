@@ -4,7 +4,7 @@ Data Cleaning Agent — Data transformation and quality specialist.
 import os
 
 from google.adk.agents import Agent
-from dataverse_agent.tools import summary_tool, fallback_tool
+from dataverse_agent.tools import summary_tool, fallback_tool, stats_tool
 from dataverse_agent.prompts import load_prompt
 
 cleaning_agent = Agent(
@@ -13,9 +13,9 @@ cleaning_agent = Agent(
     description=(
         'Suggests and applies data cleaning transformations: handling missing values, '
         'removing duplicates, converting data types, filtering outliers, creating '
-        'derived columns, renaming columns, and reshaping data. Use this agent when '
-        'the user asks to clean, fix, transform, filter, or prepare the data.'
+        'derived columns (like Z-scores using stats_tool), renaming columns, and reshaping data. '
+        'Use this agent when the user asks to clean, fix, transform, filter, or prepare the data.'
     ),
-    tools=[summary_tool, fallback_tool],
+    tools=[summary_tool, fallback_tool, stats_tool],
     instruction=load_prompt('cleaning'),
 )
