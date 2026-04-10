@@ -259,3 +259,16 @@ def test_execute_python_code_fallback_blocked(bmw_df):
     code = "import os\nos.getcwd()"
     output = execute_python_code_fallback(code)
     assert "Code blocked" in output
+
+def test_get_data_summary_with_unhashable_types():
+    """Verify that complex types (lists) in a column don't crash the summary tool."""
+    df = pd.DataFrame({
+        "ID": [1, 2],
+        "Tags": [["python", "data"], ["sql", "ai"]]  # List items are unhashable
+    })
+    from dataverse_agent.tools import set_session_context, get_session_data_summary
+    set_session_context(df)
+    
+    summary = get_session_data_summary()
+    assert "Complex Type" in summary
+    assert "Statistical summary skipped" in summary

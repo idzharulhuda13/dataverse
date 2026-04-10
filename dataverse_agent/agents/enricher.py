@@ -64,15 +64,19 @@ def enrich_query(
     # Build statistical grounding context
     stats = []
     for col in df.columns:
-        nu = df[col].nunique()
-        if pd.api.types.is_numeric_dtype(df[col]):
-            mi, ma = df[col].min(), df[col].max()
-            stats.append(f"- {col}: {nu} unique values | range: [{mi}, {ma}]")
-        elif pd.api.types.is_datetime64_any_dtype(df[col]):
-            mi, ma = df[col].min(), df[col].max()
-            stats.append(f"- {col}: {nu} unique values | range: [{mi}, {ma}]")
-        else:
-            stats.append(f"- {col}: {nu} unique values")
+        try:
+            nu = df[col].nunique()
+            if pd.api.types.is_numeric_dtype(df[col]):
+                mi, ma = df[col].min(), df[col].max()
+                stats.append(f"- {col}: {nu} unique values | range: [{mi}, {ma}]")
+            elif pd.api.types.is_datetime64_any_dtype(df[col]):
+                mi, ma = df[col].min(), df[col].max()
+                stats.append(f"- {col}: {nu} unique values | range: [{mi}, {ma}]")
+            else:
+                stats.append(f"- {col}: {nu} unique values")
+        except TypeError:
+            # Fallback for unhashable types (complex fields)
+            stats.append(f"- {col}: Complex type (grounding skipped)")
     grounding_context = "Statistical Grounding:\n" + "\n".join(stats)
 
     dataset_label = f"Dataset name: {dataset_name}\n" if dataset_name else ""

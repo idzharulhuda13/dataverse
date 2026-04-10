@@ -92,13 +92,23 @@ def get_session_data_summary() -> str:
         cat_df = df.select_dtypes(exclude='number')
         if not cat_df.empty:
             summary.append("Category Samples:")
-            for col in cat_df.columns[:3]: # limit to first 3 cats
-                uniques = df[col].dropna().unique()
-                if len(uniques) <= 20:
-                    summary.append(f"- {col} (All {len(uniques)} unique values):\n{uniques.tolist()}")
-                else:
-                    top_v = df[col].value_counts().head(5).to_string()
-                    summary.append(f"- {col} (Top 5 of {len(uniques)} unique values):\n{top_v}")
+            for col in cat_df.columns[:3]:  # limit to first 3 cats
+                try:
+                    uniques = df[col].dropna().unique()
+                    if len(uniques) <= 20:
+                        summary.append(
+                            f"- {col} (All {len(uniques)} unique values):\n{uniques.tolist()}"
+                        )
+                    else:
+                        top_v = df[col].value_counts().head(5).to_string()
+                        summary.append(
+                            f"- {col} (Top 5 of {len(uniques)} unique values):\n{top_v}"
+                        )
+                except TypeError:
+                    # Fallback for unhashable types like lists/arrays (common in BQ repeated fields)
+                    summary.append(
+                        f"- {col} (Complex Type): Statistical summary skipped (contains unhashable data)."
+                    )
     
     # No side-effects here to allow multiple calls if needed
     return "\n".join(summary)
@@ -862,11 +872,38 @@ def calculate_statistical_metric(column: str, group_by: str = None, metric_type:
     except Exception as e:
         return f"Error calculating statistic: {str(e)}"
 
+@error_guardrail(context="Database")
+def fetch_sql_data_to_sandbox(query: str) -> str:
+    """Execute a SQL query via the active connector and load results into the sandbox.
+    
+    The resulting DataFrame is assigned to `viz_temp_df` in the sandbox, making it
+    immediately available for the Visual Analyst to use for charting.
+    
+    Args:
+        query: The SQL query to execute.
+    """
+    from models.connectors import get_active_connector
+    
+    try:
+        connector = get_active_connector()
+        df = connector.execute_query(query)
+        
+        if df.empty:
+            return "Query executed successfully, but returned zero rows. No data to analyze."
+            
+        # Store in thread-local storage as viz_temp_df
+        _local.viz_temp_df = df
+        
+        return f"Successfully fetched {len(df)} rows into the sandbox. Data is now available in `viz_temp_df`."
+    except Exception as e:
+        return f"Database Error: {str(e)}"
+
 viz_tool = FunctionTool(func=create_visualization)
 summary_tool = FunctionTool(func=get_data_summary)
 table_tool = FunctionTool(func=create_table)
 fallback_tool = FunctionTool(func=execute_python_code_fallback)
 weighted_tool = FunctionTool(func=calculate_weighted_metric)
 stats_tool = FunctionTool(func=calculate_statistical_metric)
+sql_tool = FunctionTool(func=fetch_sql_data_to_sandbox)
 
-TOOLS = [viz_tool, summary_tool, table_tool, fallback_tool, weighted_tool, stats_tool]
+TOOLS = [viz_tool, summary_tool, table_tool, fallback_tool, weighted_tool, stats_tool, sql_tool]
