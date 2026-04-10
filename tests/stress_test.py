@@ -94,31 +94,31 @@ class TestQuestion:
 STRESS_TEST_QUESTIONS: list[TestQuestion] = [
     TestQuestion(
         id="H1",
-        question="Statistical Outliers: Identify store locations where the average profit margin is more than 2 standard deviations away from the global mean. Visualize these outliers in a scatter plot and label the specific store names.",
-        expected_chart_type="scatter",
+        question="Analyze store profitability. Use the column that best represents the 'bottom line' profit margin, but only for stores that are in the 'Top 50%' of revenue generators. Show this as a ranked bar chart with mean profit margin labeled.",
+        expected_chart_type="bar",
         checks=["chart_generated", "dataset_intact"],
     ),
     TestQuestion(
         id="H2",
-        question="Weighted Metrics: Create a comparison of 'Loyalty-Adjusted Revenue' (Revenue * 1.2 for Loyalty Members, 1.0 for others) versus raw revenue across different store types. Display the results in a grouped bar chart.",
-        expected_chart_type="bar",
-        checks=["chart_generated", "dataset_intact"],
-    ),
-    TestQuestion(
-        id="H3",
-        question="What-If Scenario: Forecast the total revenue for the next 3 months. In the same visualization, include a 'What-If' scenario line that assumes a 10% reduction in total purchase quantity due to supply shifts.",
+        question="Identify 'Dead Brands'—brands that had revenue in the first 3 months of the dataset (June-August 2024) but zero revenue in the last available month (December 2024). Visualize the historical monthly revenue trend for these specific brands as a line chart.",
         expected_chart_type="line",
         checks=["chart_generated", "dataset_intact"],
     ),
     TestQuestion(
-        id="H4",
-        question="Binned Correlation: Analyze the relationship between customer_age and revenue_per_unit by grouping customers into 10-year age buckets. Plot the average transaction value on the primary axis and the count of unique orders on the secondary axis.",
+        id="H3",
+        question="A data entry error caused some 'discount' values greater than 0.5 to be recorded as text (e.g., '60% OFF') in the 'discount_label' column while 'discount' shows 0. Calculate the 'True Net Revenue' (Revenue - (Revenue * Correct Discount)) by reconciling both columns. Show the top 5 brands by True Net Revenue in a bar chart.",
         expected_chart_type="bar",
         checks=["chart_generated", "dataset_intact"],
     ),
     TestQuestion(
+        id="H4",
+        question="Identify 'Efficiency Leaders': Brands where the average `revenue_per_unit` is a statistical outlier (Z-score > 1.5). For these leaders, visualize their monthly revenue trend over the entire period to check for consistency.",
+        expected_chart_type="line",
+        checks=["chart_generated", "dataset_intact"],
+    ),
+    TestQuestion(
         id="H5",
-        question="Compositional Drift: Visualize how the brand-level revenue share has shifted between the first half (H1) and second half (H2) of the year. Use a slope chart to track the change for the top 5 brands.",
+        question="Compare 'Weekend Warrior' brands (those with the highest revenue share on weekends) against 'Weekday Staples'. Generate a slope chart comparing the average daily revenue share between 'Weekend' and 'Weekday' for the top 5 brands with the highest weekend share.",
         expected_chart_type="slope",
         checks=["chart_generated", "dataset_intact"],
     ),
