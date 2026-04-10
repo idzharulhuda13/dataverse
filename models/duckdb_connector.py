@@ -1,15 +1,11 @@
-"""
-DuckDB Warehouse Connector for DataVerse Enterprise Mode.
-
-Provides access to the pre-built dbt data marts stored in
-dbt/dataverse/dataverse_warehouse.duckdb.
-"""
 from pathlib import Path
+from typing import List
 
 import duckdb
 import pandas as pd
 
 from dataverse_agent.schemas import TableRegistryEntry
+from models.connectors import BaseConnector
 
 # ── Warehouse location ─────────────────────────────────────────────────────────
 _PROJECT_ROOT = Path(__file__).parent.parent
@@ -75,41 +71,51 @@ TABLE_REGISTRY: dict[str, TableRegistryEntry] = {
     ),
 }
 
+class DuckDBConnector(BaseConnector):
+    """
+    DuckDB implementation of the Database Connector.
+    """
 
-def list_tables() -> list[TableRegistryEntry]:
-    """Return all registered tables as a list of TableRegistryEntry models."""
-    return list(TABLE_REGISTRY.values())
+    def list_tables(self) -> List[TableRegistryEntry]:
+        """Return all registered tables as a list of TableRegistryEntry models."""
+        return list(TABLE_REGISTRY.values())
 
+    def load_table(self, table_id: str) -> pd.DataFrame:
+        """Load a registered table from the DuckDB warehouse into a DataFrame."""
+        if table_id not in TABLE_REGISTRY:
+            raise ValueError(
+                f"Unknown table_id '{table_id}'. Available: {list(TABLE_REGISTRY.keys())}"
+            )
+        if not WAREHOUSE_PATH.exists():
+            raise FileNotFoundError(
+                f"Warehouse not found at {WAREHOUSE_PATH}. "
+                "Run `dbt run --profiles-dir .` inside dbt/dataverse/ to build it."
+            )
+
+        meta = TABLE_REGISTRY[table_id]
+        con = duckdb.connect(str(WAREHOUSE_PATH), read_only=True)
+        try:
+            df = con.execute(f"SELECT * FROM {meta.db_schema}.{table_id}").df()
+        finally:
+            con.close()
+        return df
+
+    def execute_query(self, query: str) -> pd.DataFrame:
+        """Execute a SQL query against the DuckDB warehouse."""
+        if not WAREHOUSE_PATH.exists():
+            raise FileNotFoundError(f"Warehouse not found at {WAREHOUSE_PATH}.")
+        
+        con = duckdb.connect(str(WAREHOUSE_PATH), read_only=True)
+        try:
+            df = con.execute(query).df()
+        finally:
+            con.close()
+        return df
+
+# Helper instances/functions for backward compatibility if needed, 
+# though we should update callers.
+def list_tables() -> List[TableRegistryEntry]:
+    return DuckDBConnector().list_tables()
 
 def load_table(table_id: str) -> pd.DataFrame:
-    """Load a registered table from the DuckDB warehouse into a DataFrame.
-
-    Args:
-        table_id: Key from TABLE_REGISTRY (e.g. 'mrt_sales').
-
-    Returns:
-        Full table as a pandas DataFrame.
-
-    Raises:
-        ValueError: If table_id is not registered.
-        FileNotFoundError: If the warehouse file is missing.
-    """
-    if table_id not in TABLE_REGISTRY:
-        raise ValueError(
-            f"Unknown table_id '{table_id}'. Available: {list(TABLE_REGISTRY.keys())}"
-        )
-    if not WAREHOUSE_PATH.exists():
-        raise FileNotFoundError(
-            f"Warehouse not found at {WAREHOUSE_PATH}. "
-            "Run `dbt run --profiles-dir .` inside dbt/dataverse/ to build it."
-        )
-
-    meta = TABLE_REGISTRY[table_id]
-
-    con = duckdb.connect(str(WAREHOUSE_PATH), read_only=True)
-    try:
-        df = con.execute(f"SELECT * FROM {meta.db_schema}.{table_id}").df()
-    finally:
-        con.close()
-
-    return df
+    return DuckDBConnector().load_table(table_id)
