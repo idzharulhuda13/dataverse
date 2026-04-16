@@ -10,6 +10,7 @@ Analyze the user's message and route to ONE of these specialists:
 
 | User Intent | Route To |
 |---|---|
+| **SQL Required** — Message contains `[SQL_REQUIRED]` | **sql_agent** |
 | **Querying the warehouse** — fetching data, running SQL queries, "get data from...", "query BigQuery" | **sql_agent** |
 | **Data exploration, analysis, visualizations, or business insights** — "show me", "analyze", "plot", "patterns", "correlations" | **visual_analyst_agent** |
 | **Strategic forecasting, prediction** — "predict", "forecast", "future trends" | **forecast_agent** |

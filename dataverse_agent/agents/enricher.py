@@ -34,6 +34,9 @@ def enrich_query(
     df: pd.DataFrame,
     chat_history: list[dict] | None = None,
     dataset_name: str | None = None,
+    is_warehouse: bool = False,
+    table_id: str | None = None,
+    db_schema: str | None = None,
 ) -> EnricherResult:
     """Rewrite a vague user query into a specific analytical prompt.
 
@@ -42,6 +45,9 @@ def enrich_query(
         df: The current DataFrame for schema context.
         chat_history: Optional list of recent messages for context.
         dataset_name: Optional human-readable dataset name (used in enterprise mode).
+        is_warehouse: Whether we are in warehouse scaling mode (SQL required for aggregation).
+        table_id: The machine-readable table identifier (e.g. 'mrt_sales').
+        db_schema: The database or project schema path (e.g. 'bigquery-public-data.github_repos').
 
     Returns:
         EnricherResult with .enriched_query (str) and .usage (UsageMetadata).
@@ -80,11 +86,17 @@ def enrich_query(
     grounding_context = "Statistical Grounding:\n" + "\n".join(stats)
 
     dataset_label = f"Dataset name: {dataset_name}\n" if dataset_name else ""
+    warehouse_label = ""
+    if is_warehouse:
+        warehouse_label = f"[WAREHOUSE_MODE]: ACTIVE\n[TABLE_ID]: {table_id}\n[DB_SCHEMA]: {db_schema}\n"
+        
     user_prompt = (
         f"{history_context}"
         f"Raw user query: {user_text}\n\n"
+        f"{warehouse_label}"
         f"{dataset_label}"
-        f"Dataset:\n{df_context}\n\n"
+        f"Valid Column List: {df.columns.tolist()}\n\n"
+        f"Dataset Details:\n{df_context}\n\n"
         f"{grounding_context}"
     )
 

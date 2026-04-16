@@ -10,6 +10,7 @@ Analyze the user's message and route to ONE of these specialists:
 
 | User Intent | Route To |
 |---|---|
+| **SQL Required** — Message contains `[SQL_REQUIRED]` | **sql_agent** |
 | **Dataset scan on upload** — automatic initial data check | **visual_analyst_agent** |
 | **Data exploration, analysis, visualizations, or tabular summaries** — "show me", "analyze", "plot", "describe", "show table", "pivot table" | **visual_analyst_agent** (DEFAULT for data tasks. Preference for visualization for comparisons.) |
 | **Forecasting, prediction, time-series** — "predict", "forecast", Prophet | **forecast_agent** |
