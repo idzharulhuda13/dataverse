@@ -15,7 +15,7 @@ from models.utils import load_dataframe, get_excel_sheet_names, extract_non_code
 from models.connectors import BaseConnector, get_active_connector
 from models.duckdb_connector import DuckDBConnector
 from models.bigquery_connector import BigQueryConnector
-from dataverse_agent.agent import root_agent
+from dataverse_agent.agent import get_orchestrator
 from dataverse_agent.agents.enricher import enrich_query
 from dataverse_agent.tools import set_session_context, get_session_figures, get_final_df, get_display_df
 from dataverse_agent.infographic import generate_infographic_content, render_infographic_pdf
@@ -88,6 +88,10 @@ def _render_activity_trace(trace: list):
                 icon = "🚀"
             elif event.event_type == "complete":
                 icon = "✅"
+            elif event.event_type == "thought":
+                icon = "🧠"
+            elif event.event_type == "transfer":
+                icon = "↪️"
 
             # Display event header
             st.markdown(f"**{icon} {event.agent_name.title()}** `{timestamp}`")
@@ -99,6 +103,9 @@ def _render_activity_trace(trace: list):
                 code = args.get("code") or args.get("python_code") or args.get("script")
                 if code:
                     st.code(code, language="python")
+                elif args:
+                    # Show other arguments (like agent names or filters)
+                    st.json(args)
 
 def _render_error_mitigation(guidance_json: str):
     """Renders a friendly error message and a technical expander."""
@@ -146,14 +153,16 @@ if not api_key:
     st.stop()
 os.environ["GEMINI_API_KEY"] = api_key
 
-if "runner" not in st.session_state:
+if "runner" not in st.session_state or st.session_state.get("runner_enterprise_mode") != st.session_state.get("enterprise_mode", False):
     st.session_state.session_service = InMemorySessionService()
+    current_mode = st.session_state.get("enterprise_mode", False)
     st.session_state.runner = Runner(
         app_name="dataverse",
-        agent=root_agent,
+        agent=get_orchestrator(current_mode),
         session_service=st.session_state.session_service,
         auto_create_session=True
     )
+    st.session_state.runner_enterprise_mode = current_mode
 
 # Sessions registry
 if "sessions" not in st.session_state:
@@ -477,11 +486,16 @@ def _run_agent_and_save(llm_prompt: str, user_display_text: str | None = None):
 
     async def generate_response():
         final_text = ""
+        current_agent = "orchestrator" # Start with orchestrator
+
         async for event in runner.run_async(
             user_id="default",
             session_id=current_session,
             new_message=types.Content(parts=[types.Part.from_text(text=llm_prompt)])
         ):
+            # The 'author' field on the Event identifies which agent is acting
+            current_agent = event.author if event.author else "orchestrator"
+
             # Capture usage metadata from ADK Runner events
             if hasattr(event, 'usage_metadata') and event.usage_metadata:
                 st.session_state.usage.record_api_call({
@@ -494,16 +508,38 @@ def _run_agent_and_save(llm_prompt: str, user_display_text: str | None = None):
                 for p in event.content.parts:
                     if p.text:
                         final_text += p.text
+                        # Record thought trace
+                        if st.session_state.get("show_observability"):
+                            st.session_state.usage.record_trace(
+                                event_type="thought",
+                                agent_name=current_agent,
+                                detail=p.text.strip()[:500] + ("..." if len(p.text.strip()) > 500 else "")
+                            )
                     
-                    # Observability: Record tool calls
+                    # Observability: Record tool calls and transfers
                     if st.session_state.get("show_observability"):
+                        # 1. Check for official ADK Handoffs in EventActions
+                        if event.actions and event.actions.transfer_to_agent:
+                            target_agent = event.actions.transfer_to_agent
+                            detail = f"Transferring task to: **{target_agent.upper()}**"
+                            st.session_state.usage.record_trace(
+                                event_type="transfer",
+                                agent_name=current_agent,
+                                detail=detail
+                            )
+
+                        # 2. Record standard Tool Calls
                         if hasattr(p, "function_call") and p.function_call:
-                            # Record tool name and full code (usually in 'code' or 'python_code' arg)
+                            # Skip recording the transfer tool itself as a tool_call since we handled it above
+                            if p.function_call.name == "transfer_to_agent":
+                                continue
+
                             args = dict(p.function_call.args) if p.function_call.args else {}
                             detail = f"Calling tool: {p.function_call.name}"
+                            
                             st.session_state.usage.record_trace(
                                 event_type="tool_call",
-                                agent_name="agent", 
+                                agent_name=current_agent, 
                                 detail=detail,
                                 metadata={
                                     "tool_name": p.function_call.name,

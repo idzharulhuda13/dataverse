@@ -470,30 +470,48 @@ def create_visualization(chart_type: str, x_column: str, y_column: str = None, y
                     ax.fill_between(df[x_column], df[y_column] if y_column else 0, color=HIGHLIGHT, alpha=0.4)
                     ax.plot(df[x_column], df[y_column] if y_column else 0, color=HIGHLIGHT, linewidth=2)
             elif chart_type == 'slope':
-                if not hue:
-                    plt.close(fig)
-                    return "Error: Slope chart requires 'hue' parameter for comparison."
-                # Filter to min and max X to enforce the two-point slope 
-                unique_x = sorted(df[x_column].unique())
-                if len(unique_x) > 2:
-                    min_x, max_x = unique_x[0], unique_x[-1]
-                    slope_df = df[df[x_column].isin([min_x, max_x])]
-                else:
-                    slope_df = df
-                    
-                pivot_df = slope_df.pivot_table(index=hue, columns=x_column, values=y_column, aggfunc=estimator).dropna()
-                if pivot_df.empty or pivot_df.shape[1] != 2:
-                    plt.close(fig)
-                    return "Error: Slope chart could not find two distinct X values to connect."
+                # Slope charts show transition between two points.
+                # Format A (Wide): x_column (labels), y_column (point 1), y2_column (point 2)
+                # Format B (Long): x_column (two categories), y_column (values), hue (labels)
                 
-                x_vals = pivot_df.columns
+                if y2_column:
+                    # Format A: Wide data (e.g., brand | mean_weekend | mean_weekday)
+                    pivot_df = df.set_index(x_column)[[y_column, y2_column]].dropna()
+                    x_vals = [y_column, y2_column]
+                else:
+                    # Format B: Long data (requires hue)
+                    if not hue:
+                        plt.close(fig)
+                        return "Error: Slope chart requires either 'y2_column' (for wide data) or 'hue' (for long data)."
+                    
+                    unique_x = sorted(df[x_column].unique())
+                    if len(unique_x) > 2:
+                        min_x, max_x = unique_x[0], unique_x[-1]
+                        slope_df = df[df[x_column].isin([min_x, max_x])]
+                    else:
+                        slope_df = df
+                        
+                    pivot_df = slope_df.pivot_table(index=hue, columns=x_column, values=y_column, aggfunc=estimator).dropna()
+                    x_vals = pivot_df.columns
+
+                if pivot_df.empty or (not y2_column and pivot_df.shape[1] != 2):
+                    plt.close(fig)
+                    return "Error: Slope chart could not find two distinct values to connect."
+                
                 for i, category in enumerate(pivot_df.index):
                     y_vals = pivot_df.loc[category].values
                     color = palette[i % len(palette)]
-                    ax.plot(x_vals, y_vals, marker='o', markersize=6, label=category, color=color, linewidth=2.5)
+                    ax.plot(x_vals, y_vals, marker='o', markersize=8, label=str(category), color=color, linewidth=2.5)
+                    
+                    # Add data labels
+                    for x, y in zip(x_vals, y_vals):
+                        ax.annotate(f"{y:.1f}" if isinstance(y, (int, float)) else str(y), 
+                                    (x, y), textcoords="offset points", xytext=(0,10), ha='center',
+                                    fontsize=9, fontweight='bold', color=color)
                 
-                ax.set_xticks(x_vals)
-                ax.set_xlim(min(x_vals) - (max(x_vals)-min(x_vals))*0.1, max(x_vals) + (max(x_vals)-min(x_vals))*0.1)
+                ax.set_xticks(range(len(x_vals)))
+                ax.set_xticklabels(x_vals)
+                ax.set_xlim(-0.2, 1.2)
                 use_legend = True
             elif chart_type == 'heatmap':
                 # Pivot heatmap requires 3 dimensions: Index (x), Columns (hue), and Metric (y)
