@@ -142,6 +142,12 @@ class TestResult:
     error: Optional[str] = None
     duration_seconds: float = 0.0
 
+    # Usage Metrics
+    api_calls: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    turns: int = 0
+
     # Dataset integrity checks
     df_columns_before: list[str] = field(default_factory=list)
     df_columns_after: list[str] = field(default_factory=list)
@@ -207,8 +213,11 @@ class StressTestRunner:
 
         self.results: list[TestResult] = []
 
-    async def _send_to_agent(self, prompt: str) -> tuple[str, list[dict]]:
-        """Send a prompt to the agent with retry-on-rate-limit."""
+    async def _send_to_agent(self, prompt: str) -> tuple[str, list[dict], dict]:
+        """Send a prompt to the agent with retry-on-rate-limit.
+        Returns: (text, tool_calls, usage_stats)
+        """
+        usage = {"api_calls": 0, "input_tokens": 0, "output_tokens": 0}
         for attempt in range(CONFIG.max_retries + 1):
             try:
                 final_text = ""
@@ -218,6 +227,14 @@ class StressTestRunner:
                     session_id=self.session_id,
                     new_message=types.Content(parts=[types.Part.from_text(text=prompt)]),
                 ):
+                    # Extract usage metadata
+                    if hasattr(event, 'usage_metadata') and event.usage_metadata:
+                        usage["input_tokens"] += event.usage_metadata.prompt_token_count
+                        usage["output_tokens"] += event.usage_metadata.candidates_token_count
+                        # We count one API call per response chunk that carries usage
+                        # (Usually ADK sends usage at the end of a completion)
+                        usage["api_calls"] += 1
+
                     if event.content and event.content.parts:
                         for p in event.content.parts:
                             if p.text:
@@ -225,7 +242,7 @@ class StressTestRunner:
                             if hasattr(p, "function_call") and p.function_call:
                                 args_dict = dict(p.function_call.args) if hasattr(p.function_call, "args") and p.function_call.args else {}
                                 tool_calls.append({"name": p.function_call.name, "args": args_dict})
-                return final_text, tool_calls
+                return final_text, tool_calls, usage
             except Exception as e:
                 if "429" in str(e) and attempt < CONFIG.max_retries:
                     delay = CONFIG.retry_base_delay * (attempt + 1)
@@ -234,7 +251,7 @@ class StressTestRunner:
                 else:
                     raise
 
-    async def _generate_insight(self, figure) -> str:
+    async def _generate_insight(self, figure) -> tuple[str, dict]:
         """Second-pass: send chart image to agent for insight generation."""
         img_buf = io.BytesIO()
         figure.savefig(img_buf, format="png")
@@ -244,19 +261,12 @@ class StressTestRunner:
         data_grounding_summary = get_session_data_summary()
         
         insight_prompt = (
-            "You are looking at a chart generated from the following dataset summary:\n\n"
-            "### [Reference Data Grounding]\n"
+            "Provide a focused data insight for this chart based on the summary:\n"
             f"{data_grounding_summary}\n\n"
-            "---\n\n"
-            "Provide a focused data insight using this strict two-part framework:\n\n"
-            "**📊 Observation (What do I see?):** What specific, factual patterns, trends, outliers, or distributions exist in the chart?\n"
-            "Be precise — use the **Reference Data Grounding** above to cite exact numbers, percentages, or rankings where possible.\n\n"
-            "**💡 Interpretation (Why does it matter?):** What is the core business or practical implication of this pattern? "
-            "Consider: Is there a concentration risk? A growth opportunity? An anomaly that needs investigation?\n\n"
-            "Keep it concise (2-4 sentences total). Be highly specific and avoid generic statements.\n\n"
-            "CRITICAL: Do NOT suggest any recommendations, follow-up analyses, or next steps here. Focus purely on interpreting the visual evidence in front of you."
+            "Use the strict framework: **📊 Observation** and **💡 Interpretation**."
         )
 
+        usage = {"api_calls": 0, "input_tokens": 0, "output_tokens": 0}
         for attempt in range(CONFIG.max_retries + 1):
             try:
                 text = ""
@@ -268,11 +278,16 @@ class StressTestRunner:
                         types.Part.from_bytes(data=img_bytes, mime_type="image/png"),
                     ]),
                 ):
+                    if hasattr(event, 'usage_metadata') and event.usage_metadata:
+                        usage["input_tokens"] += event.usage_metadata.prompt_token_count
+                        usage["output_tokens"] += event.usage_metadata.candidates_token_count
+                        usage["api_calls"] += 1
+
                     if event.content and event.content.parts:
                         for p in event.content.parts:
                             if p.text:
                                 text += p.text
-                return extract_non_code_text(text)
+                return extract_non_code_text(text), usage
             except Exception as e:
                 if "429" in str(e) and attempt < CONFIG.max_retries:
                     delay = CONFIG.retry_base_delay * (attempt + 1)
@@ -422,6 +437,12 @@ class StressTestRunner:
                 enriched_question = enrich_result.enriched_query
                 result.enriched_question = enriched_question
                 print(f"      Enriched: {enriched_question}")
+                
+                # Capture enrichment usage
+                result.api_calls += 1
+                result.turns += 1
+                result.input_tokens += enrich_result.usage.prompt_token_count
+                result.output_tokens += enrich_result.usage.candidates_token_count
             except Exception as e:
                 print(f"      ⚠️ Enrichment failed: {e}. Using raw query.")
                 enriched_question = question.question
@@ -431,9 +452,15 @@ class StressTestRunner:
 
             # 4. Send to agent
             print(f"   🤖 Sending to Orchestrator...")
-            response_text, tool_calls = await self._send_to_agent(llm_prompt)
+            response_text, tool_calls, usage = await self._send_to_agent(llm_prompt)
             result.tool_calls = tool_calls
             result.response_text = extract_non_code_text(response_text)
+            
+            # Record main agent usage
+            result.api_calls += usage["api_calls"]
+            result.input_tokens += usage["input_tokens"]
+            result.output_tokens += usage["output_tokens"]
+            result.turns += 1
 
             # Retrieve generated figures
             figures = get_session_figures()
@@ -467,7 +494,11 @@ class StressTestRunner:
 
                 # Second pass: generate insight
                 try:
-                    result.insight_text = await self._generate_insight(figure)
+                    result.insight_text, vision_usage = await self._generate_insight(figure)
+                    result.api_calls += vision_usage["api_calls"]
+                    result.input_tokens += vision_usage["input_tokens"]
+                    result.output_tokens += vision_usage["output_tokens"]
+                    result.turns += 1
                 except Exception as e:
                     result.insight_text = f"[Insight generation failed: {e}]"
             else:
@@ -539,13 +570,22 @@ class StressTestRunner:
         else:
             print(f"\n   ⏩ Skipping Initial Cleaning Phase (data source is already clean).")
 
+        # Track global usage for total report
+        self.total_usage = {"api_calls": 0, "input_tokens": 0, "output_tokens": 0, "turns": 0}
+
         for i, q in enumerate(questions):
-            # Inter-question delay to avoid rate limiting (skip before first question)
+            # Inter-question delay to avoid rate limiting
             if i > 0 and self.inter_question_delay > 0:
                 print(f"\n   ⏳ Waiting {self.inter_question_delay}s before next question (rate limit cooldown)...")
                 await asyncio.sleep(self.inter_question_delay)
 
-            await self.run_question(q)
+            res = await self.run_question(q)
+            
+            # Aggregate totals
+            self.total_usage["api_calls"] += res.api_calls
+            self.total_usage["input_tokens"] += res.input_tokens
+            self.total_usage["output_tokens"] += res.output_tokens
+            self.total_usage["turns"] += res.turns
 
             # Check if dataset was corrupted — if so, note it but continue
             # (to see how subsequent questions handle the broken state)
@@ -573,8 +613,8 @@ class StressTestRunner:
             "",
             "## Scorecard",
             "",
-            "| # | Question | Chart? | Dataset Intact? | Duration | Checks |",
-            "|---|----------|--------|-----------------|----------|--------|",
+            "| # | Question | Chart? | Dataset Intact? | Duration | Usage (Calls/Tokens) | Checks |",
+            "|---|----------|--------|-----------------|----------|----------------------|--------|",
         ]
 
         total_pass = 0
@@ -592,15 +632,21 @@ class StressTestRunner:
             total_fail += failed
 
             check_summary = f"{passed}✅ {failed}❌ {manual}👁️"
+            usage_summary = f"{r.api_calls} calls / {r.input_tokens + r.output_tokens:,} tkn"
 
             lines.append(
-                f"| {r.question.id} | {r.question.question[:50]}… | {chart_icon} | {intact_icon} | {r.duration_seconds:.1f}s | {check_summary} |"
+                f"| {r.question.id} | {r.question.question[:50]}… | {chart_icon} | {intact_icon} | {r.duration_seconds:.1f}s | {usage_summary} | {check_summary} |"
             )
 
         lines.extend([
             "",
             f"**Overall: {total_pass} passed, {total_fail} failed, "
             f"{sum(1 for r in self.results for v in r.check_results.values() if v == 'MANUAL_CHECK')} manual checks**",
+            "",
+            "### Global Resource Usage",
+            f"- **Total API Calls:** {self.total_usage['api_calls']}",
+            f"- **Total Tokens:** {self.total_usage['input_tokens'] + self.total_usage['output_tokens']:,} (Input: {self.total_usage['input_tokens']:,}, Output: {self.total_usage['output_tokens']:,})",
+            f"- **Total Conversation Turns:** {self.total_usage['turns']}",
             "",
             "---",
             "",
@@ -615,6 +661,7 @@ class StressTestRunner:
                 f"**Chart generated:** {'Yes' if r.chart_generated else 'No'}  ",
                 f"**Duration:** {r.duration_seconds:.1f}s  ",
                 f"**Dataset intact:** {'Yes' if r.dataset_intact else '🚨 NO'}  ",
+                f"**Usage:** {r.api_calls} calls, {r.input_tokens:,} input tokens, {r.output_tokens:,} output tokens, {r.turns} turns  ",
                 "",
             ])
 
