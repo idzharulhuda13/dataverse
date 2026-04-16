@@ -40,7 +40,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from models.utils import load_dataframe, extract_non_code_text
-from models.duckdb_connector import load_table
+from models.connectors.duckdb import DuckDBConnector
 from dataverse_agent.agent import get_orchestrator
 from dataverse_agent.tools import set_session_context, get_session_figures, get_final_df, get_session_data_summary
 
@@ -187,7 +187,8 @@ class StressTestRunner:
         print(f"📂 Loading dataset: {self.dataset_path}")
         if self.dataset_path.suffix.lower() == ".duckdb":
             print(f"   🗄️ DuckDB Warehouse detected. Loading '{CONFIG.duckdb_table_name}'...")
-            self.original_df = load_table(CONFIG.duckdb_table_name)
+            connector = DuckDBConnector()
+            self.original_df = connector.load_table(CONFIG.duckdb_table_name)
         else:
             with open(self.dataset_path, "rb") as f:
                 self.original_df, error = load_dataframe(f)

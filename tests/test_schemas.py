@@ -222,7 +222,7 @@ class TestTableRegistryEntry:
         assert entry.tags == []
 
     def test_registry_import(self):
-        from models.duckdb_connector import TABLE_REGISTRY
+        from models.connectors.duckdb import TABLE_REGISTRY
         assert "mrt_sales" in TABLE_REGISTRY
         entry = TABLE_REGISTRY["mrt_sales"]
         assert isinstance(entry, TableRegistryEntry)

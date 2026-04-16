@@ -13,8 +13,8 @@ from google.genai import types
 
 from models.utils import load_dataframe, get_excel_sheet_names, extract_non_code_text, SUPPORTED_EXTENSIONS
 from models.connectors import BaseConnector, get_active_connector
-from models.duckdb_connector import DuckDBConnector
-from models.bigquery_connector import BigQueryConnector
+from models.connectors.duckdb import DuckDBConnector
+from models.connectors.bigquery import BigQueryConnector
 from dataverse_agent.agent import get_orchestrator
 from dataverse_agent.agents.enricher import enrich_query
 from dataverse_agent.tools import set_session_context, get_session_figures, get_final_df, get_display_df
@@ -185,6 +185,7 @@ for key, default in [
     ("is_logged_in", False),
     ("enterprise_mode", False),   # seeded from file-level constant
     ("enterprise_table_id", None),
+    ("enterprise_db_schema", None),
     ("enterprise_dataset_name", None),
     ("connector_type", "duckdb"), # "duckdb" | "bigquery"
 ]:
@@ -805,6 +806,7 @@ if st.session_state.enterprise_mode and st.session_state.modified_df is None:
                 with _fc3:
                     if st.button("Load →", key=f"load_feat_{_feat.table_id}", type="primary", width="stretch"):
                         st.session_state.enterprise_table_id = _feat.table_id
+                        st.session_state.enterprise_db_schema = _feat.db_schema
                         st.session_state.enterprise_dataset_name = _feat.display_name
                         st.session_state.sessions[_current_sid]["name"] = f"🏢 {_feat.display_name}"
                         with st.spinner(f"Loading {_feat.display_name}…"):
@@ -840,6 +842,7 @@ if st.session_state.enterprise_mode and st.session_state.modified_df is None:
                     st.caption(f"~{_tbl.approx_rows} rows · {_tbl.columns} cols")
                     if st.button("Load →", key=f"load_{_tbl.table_id}", width="stretch"):
                         st.session_state.enterprise_table_id = _tbl.table_id
+                        st.session_state.enterprise_db_schema = _tbl.db_schema
                         st.session_state.enterprise_dataset_name = _tbl.display_name
                         st.session_state.sessions[_current_sid]["name"] = f"🏢 {_tbl.display_name}"
                         with st.spinner(f"Loading {_tbl.display_name}…"):
@@ -1177,6 +1180,9 @@ else:
                             st.session_state.modified_df,
                             chat_history=st.session_state.messages[-5:],
                             dataset_name=st.session_state.get("enterprise_dataset_name"),
+                            is_warehouse=st.session_state.get("enterprise_mode", False),
+                            table_id=st.session_state.get("enterprise_table_id"),
+                            db_schema=st.session_state.get("enterprise_db_schema"),
                         )
                         enriched_question = enrich_result.enriched_query
                         st.session_state.usage.record_api_call(enrich_result.usage)
