@@ -41,7 +41,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from models.utils import load_dataframe, extract_non_code_text
 from models.duckdb_connector import load_table
-from dataverse_agent.agent import root_agent
+from dataverse_agent.agent import get_orchestrator
 from dataverse_agent.tools import set_session_context, get_session_figures, get_final_df, get_session_data_summary
 
 from google.adk.runners import Runner
@@ -195,9 +195,10 @@ class StressTestRunner:
 
         # Initialize ADK Runner
         self.session_service = InMemorySessionService()
+        is_enterprise = self.dataset_path.suffix.lower() == ".duckdb"
         self.runner = Runner(
             app_name="dataverse_stress_test",
-            agent=root_agent,
+            agent=get_orchestrator(is_enterprise),
             session_service=self.session_service,
             auto_create_session=True,
         )
