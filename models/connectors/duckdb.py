@@ -1,18 +1,15 @@
 from pathlib import Path
 from typing import List
-
 import duckdb
 import pandas as pd
-
 from dataverse_agent.schemas import TableRegistryEntry
-from models.connectors import BaseConnector
+from models.connectors.base import BaseConnector
 
 # ── Warehouse location ─────────────────────────────────────────────────────────
-_PROJECT_ROOT = Path(__file__).parent.parent
+_PROJECT_ROOT = Path(__file__).parent.parent.parent
 WAREHOUSE_PATH = _PROJECT_ROOT / "dbt" / "dataverse" / "dataverse_warehouse.duckdb"
 
 # ── Table Registry ─────────────────────────────────────────────────────────────
-# Manually maintained for now. Future: auto-scan from dbt manifest.json
 TABLE_REGISTRY: dict[str, TableRegistryEntry] = {
     "mrt_sales": TableRegistryEntry(
         table_id="mrt_sales",
@@ -96,9 +93,9 @@ class DuckDBConnector(BaseConnector):
         con = duckdb.connect(str(WAREHOUSE_PATH), read_only=True)
         try:
             df = con.execute(f"SELECT * FROM {meta.db_schema}.{table_id}").df()
+            return ensure_dataframe_is_arrow_compatible(df)
         finally:
             con.close()
-        return df
 
     def execute_query(self, query: str) -> pd.DataFrame:
         """Execute a SQL query against the DuckDB warehouse."""
@@ -108,14 +105,19 @@ class DuckDBConnector(BaseConnector):
         con = duckdb.connect(str(WAREHOUSE_PATH), read_only=True)
         try:
             df = con.execute(query).df()
+            return ensure_dataframe_is_arrow_compatible(df)
         finally:
             con.close()
-        return df
 
-# Helper instances/functions for backward compatibility if needed, 
-# though we should update callers.
-def list_tables() -> List[TableRegistryEntry]:
-    return DuckDBConnector().list_tables()
-
-def load_table(table_id: str) -> pd.DataFrame:
-    return DuckDBConnector().load_table(table_id)
+def ensure_dataframe_is_arrow_compatible(df: pd.DataFrame) -> pd.DataFrame:
+    """ Ensure DataFrame is Arrow-compatible for Streamlit serialization. """
+    for col in df.columns:
+        # Convert objects that look like timestamps but cause Arrow conversion errors
+        if df[col].dtype == "object":
+            try:
+                # Try to cast to datetime if it looks like one
+                if df[col].astype(str).str.contains("-").any():
+                    df[col] = pd.to_datetime(df[col], errors='ignore')
+            except:
+                pass
+    return df
