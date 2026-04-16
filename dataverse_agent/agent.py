@@ -1,17 +1,19 @@
 """
 DataVerse Agent — Entry point for the multi-agent system.
 
-This module provides backward compatibility by re-exporting root_agent
-from the new agents package. The Streamlit dashboard and ADK Runner
-both import from here.
-
-Architecture:
-    orchestrator (root_agent)
-    ├── analyst_agent — statistical analysis & business insights
-    ├── viz_agent — premium chart creation
-    ├── forecast_agent — time-series forecasting (Prophet)
-    └── cleaning_agent — data transformations & quality
+Provides a factory to retrieve the appropriate orchestrator based on mode.
 """
-from dataverse_agent.agents import root_agent
+from google.adk.agents import Agent
+from dataverse_agent.agents.csv_orchestrator import get_csv_orchestrator
+from dataverse_agent.agents.enterprise_orchestrator import get_enterprise_orchestrator
 
-__all__ = ['root_agent']
+def get_orchestrator(enterprise_mode: bool = False) -> Agent:
+    """Returns the correct orchestrator agent based on the operation mode."""
+    if enterprise_mode:
+        return get_enterprise_orchestrator()
+    return get_csv_orchestrator()
+
+# Backward compatibility (static instance for initial load)
+root_agent = get_csv_orchestrator()
+
+__all__ = ['get_orchestrator', 'root_agent']
