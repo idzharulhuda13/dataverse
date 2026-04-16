@@ -5,6 +5,8 @@ matplotlib.use('Agg')  # Ensure thread-safe, non-interactive plotting
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import seaborn as sns
+from typing import List, Dict, Any, Optional, Literal
+from pydantic import BaseModel, Field
 from google.adk.tools import FunctionTool
 from dataverse_agent.errors import error_guardrail
 
@@ -890,29 +892,137 @@ def calculate_statistical_metric(column: str, group_by: str = None, metric_type:
     except Exception as e:
         return f"Error calculating statistic: {str(e)}"
 
+class FilterCondition(BaseModel):
+    col: str = Field(..., description="The column name to filter on.")
+    op: Literal["=", "!=", ">", "<", ">=", "<="] = Field(..., description="The comparison operator.")
+    val: Any = Field(..., description="The value to compare against.")
+
+class AggCondition(BaseModel):
+    col: str = Field(..., description="The column name to aggregate.")
+    func: Literal["SUM", "AVG", "COUNT", "MIN", "MAX"] = Field(..., description="The aggregation function (e.g. SUM, AVG).")
+    alias: Optional[str] = Field(None, description="Optional alias for the resulting column.")
+
+class HavingCondition(BaseModel):
+    col: str = Field(..., description="The column or alias to filter in HAVING (e.g. total_revenue).")
+    op: Literal["=", "!=", ">", "<", ">=", "<="] = Field(..., description="The comparison operator.")
+    val: Any = Field(..., description="The value to compare against.")
+
+class CTESpec(BaseModel):
+    name: str = Field(..., description="The name of the CTE.")
+    query: str = Field(..., description="The raw SQL query for the CTE.")
+
+class JoinCondition(BaseModel):
+    table: str = Field(..., description="Table to join.")
+    on: str = Field(..., description="Join condition (e.g. 'a.id = b.id').")
+    type: Literal["INNER", "LEFT", "RIGHT", "FULL"] = Field("INNER", description="Type of join.")
+    alias: Optional[str] = Field(None, description="Alias for the joined table.")
+
 @error_guardrail(context="Database")
-def fetch_sql_data_to_sandbox(query: str) -> str:
-    """Execute a SQL query via the active connector and load results into the sandbox.
+def execute_structured_query(
+    table: str,
+    columns: List[str] = None,
+    agg_columns: List[Any] = None,
+    filters: List[Any] = None,
+    having: List[Any] = None,
+    ctes: List[Any] = None,
+    joins: List[Any] = None,
+    group_by: List[str] = None,
+    order_by: List[Any] = None,
+    limit: Optional[int] = None
+) -> str:
+    """Execute a structured database query and load results into the sandbox.
+    
+    This tool programmatically builds a SQL query based on the parameters provided, 
+    ensuring syntax correctness for the active database (DuckDB or BigQuery).
     
     The resulting DataFrame is assigned to `viz_temp_df` in the sandbox, making it
     immediately available for the Visual Analyst to use for charting.
     
     Args:
-        query: The SQL query to execute.
+        table: The table name or identifier (can include alias 'table AS t').
+        columns: Optional list of raw columns to select (dimensions).
+        agg_columns: Optional list of aggregations (e.g. [{'col': 'rev', 'func': 'SUM'}]).
+        filters: Optional list of WHERE filters.
+        having: Optional list of HAVING filters.
+        ctes: Optional list of Common Table Expressions (raw SQL).
+        joins: Optional list of table joins (e.g. [{'table': 'other', 'on': 'a.id = b.id'}]).
+        group_by: Optional list of columns to group by.
+        order_by: Optional list of order specifications.
+        limit: Max rows to return.
     """
     from models.connectors import get_active_connector
+    from models.query_builder import build_sql
+    import streamlit as st
     
     try:
         connector = get_active_connector()
-        df = connector.execute_query(query)
+        # Determine dialect
+        db_type = st.session_state.get("connector_type", "duckdb")
+        
+        # Manually validate dicts into models to handle ADK's complex schema limitation
+        agg_dicts = []
+        if agg_columns:
+            for item in agg_columns:
+                if hasattr(item, "model_dump"):
+                    agg_dicts.append(item.model_dump())
+                else:
+                    agg_dicts.append(AggCondition.model_validate(item).model_dump())
+                    
+        filter_dicts = []
+        if filters:
+            for item in filters:
+                if hasattr(item, "model_dump"):
+                    filter_dicts.append(item.model_dump())
+                else:
+                    filter_dicts.append(FilterCondition.model_validate(item).model_dump())
+
+        having_dicts = []
+        if having:
+            for item in having:
+                if hasattr(item, "model_dump"):
+                    having_dicts.append(item.model_dump())
+                else:
+                    having_dicts.append(HavingCondition.model_validate(item).model_dump())
+
+        cte_dicts = []
+        if ctes:
+            for item in ctes:
+                if hasattr(item, "model_dump"):
+                    cte_dicts.append(item.model_dump())
+                else:
+                    cte_dicts.append(CTESpec.model_validate(item).model_dump())
+
+        join_dicts = []
+        if joins:
+            for item in joins:
+                if hasattr(item, "model_dump"):
+                    join_dicts.append(item.model_dump())
+                else:
+                    join_dicts.append(JoinCondition.model_validate(item).model_dump())
+        
+        sql = build_sql(
+            table=table,
+            db_type=db_type,
+            columns=columns,
+            agg_columns=agg_dicts or None,
+            filters=filter_dicts or None,
+            having=having_dicts or None,
+            ctes=cte_dicts or None,
+            joins=join_dicts or None,
+            group_by=group_by,
+            order_by=order_by,
+            limit=limit
+        )
+        
+        df = connector.execute_query(sql)
         
         if df.empty:
-            return "Query executed successfully, but returned zero rows. No data to analyze."
+            return f"Query executed successfully, but returned zero rows. SQL: {sql}"
             
         # Store in thread-local storage as viz_temp_df
         _local.viz_temp_df = df
         
-        return f"Successfully fetched {len(df)} rows into the sandbox. Data is now available in `viz_temp_df`."
+        return f"Successfully fetched {len(df)} rows into the sandbox `viz_temp_df`. Query: {sql}"
     except Exception as e:
         return f"Database Error: {str(e)}"
 
@@ -922,6 +1032,6 @@ table_tool = FunctionTool(func=create_table)
 fallback_tool = FunctionTool(func=execute_python_code_fallback)
 weighted_tool = FunctionTool(func=calculate_weighted_metric)
 stats_tool = FunctionTool(func=calculate_statistical_metric)
-sql_tool = FunctionTool(func=fetch_sql_data_to_sandbox)
+sql_tool = FunctionTool(func=execute_structured_query)
 
 TOOLS = [viz_tool, summary_tool, table_tool, fallback_tool, weighted_tool, stats_tool, sql_tool]
