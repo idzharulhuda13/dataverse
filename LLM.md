@@ -1,15 +1,13 @@
 # LLM.md — DataVerse Project Context
 
-> **Last updated:** 2026-04-09
+> **Last updated:** 2026-04-17
 > This file gives LLM coding assistants instant context about the DataVerse project so they can be productive without scanning the entire codebase.
 
 ---
 
-## What is DataVerse?
+DataVerse is an **AI-powered, conversational data analysis and visualization tool**. Users upload a CSV file or connect to a warehouse and chat with an AI agent to explore, visualize, forecast, and clean their data. It is built with **Streamlit** (frontend), **Google ADK** (agent framework), and the **Google Gemini API** (LLM).
 
-DataVerse is an **AI-powered, conversational data analysis and visualization tool**. Users upload a CSV file and chat with an AI agent to explore, visualize, forecast, and clean their data. It is built with **Streamlit** (frontend), **Google ADK** (agent framework), and the **Google Gemini API** (LLM).
-
-**Live deployment:** [dataverse-app.streamlit.app](https://dataverse-app.streamlit.app/)
+**Live deployment:** [dataverse-appv2.streamlit.app](https://dataverse-appv2.streamlit.app/)
 
 ---
 
@@ -50,25 +48,29 @@ DataVerse/
 │
 ├── dataverse_agent/               ← Agent package
 │   ├── __init__.py                ← Imports agent.py
-│   ├── agent.py                   ← Re-exports root_agent from agents/
+│   ├── agent.py                   ← Re-exports root_agent (factory for CSV vs Enterprise)
 │   ├── schemas.py                 ← Centralized Pydantic data models for types & validation
 │   ├── errors.py                  ← Error mitigation registry & user guidance logic
-│   ├── tools.py                   ← ADK FunctionTools (create_visualization, get_data_summary, create_table, execute_python_code_fallback)
-│   ├── messages.py                ← Centralized chat messages (intro, no-csv, session-resume, upload-landing, analyzing)
-│   ├── usage.py                   ← Re-exports SessionUsage and TraceEvent from schemas.py
-│   ├── commands.py                ← Slash command parser & handler (/summary, /export, /undo, /pin, /clear, /cost, /help)
+│   ├── tools.py                   ← ADK FunctionTools (viz, summary, fallback, sql, stats, weighted)
+│   ├── messages.py                ← Centralized chat messages
+│   ├── usage.py                   ← Re-exports SessionUsage and TraceEvent
+│   ├── commands.py                ← Slash command parser /summary, /export, /undo, /pin, /clear, /cost, /help
 │   ├── agents/                    ← Multi-agent definitions
-│   │   ├── __init__.py            ← Exports orchestrator as root_agent
-│   │   ├── orchestrator.py        ← Central router agent (delegates to sub-agents)
+│   │   ├── __init__.py            ← Exports orchestrator
+│   │   ├── csv_orchestrator.py    ← Router for files (delegates to cleaning, analyst, forecast)
+│   │   ├── enterprise_orchestrator.py ← Router for warehouse (delegates to sql, analyst, forecast)
 │   │   ├── visual_analyst.py      ← Analysis + premium chart creation
+│   │   ├── sql_agent.py           ← Specialist for structured warehouse querying
 │   │   ├── forecast.py            ← Time-series forecasting (Prophet)
 │   │   ├── cleaning.py            ← Data transformations & quality
-│   │   └── enricher.py            ← Stateless query rewriting/alignment (direct Gemini call)
-│   ├── infographic.py             ← Agent-driven infographic generation and PDF rendering
+│   │   └── enricher.py            ← Stateless query rewriting/alignment
+│   ├── infographic.py             ← Agent-driven infographic generation
 │   └── prompts/                   ← Markdown prompt files for each agent
-│       ├── __init__.py            ← load_prompt(name) utility
-│       ├── orchestrator.md
+│       ├── __init__.py            
+│       ├── csv_orchestrator.md
+│       ├── enterprise_orchestrator.md
 │       ├── visual_analyst.md
+│       ├── sql_agent.md
 │       ├── forecast.md
 │       ├── cleaning.md
 │       └── enricher.md
@@ -131,11 +133,12 @@ User Chat Input
  └───────────┘ └──────────┘ └──────────┘
 ```
 
-- **Query Enricher:** Stateless, single-shot Gemini API call (`enrich_query()` in `dataverse_agent/agents/enricher.py`). Rewrites vague user queries into specific analytical prompts aligned with the dataset schema. Also accepts `chat_history` (last 5 messages) for context-aware follow-up resolution. Returns a tuple `(enriched_str, usage_dict)` — usage is fed back to `SessionUsage.record_api_call()`. Not an ADK agent — uses `google.genai.Client` directly for speed.
-- **Orchestrator:** Analyzes intent, delegates to the correct sub-agent. Has no tools itself.
-- **Visual Analyst:** Stats analysis + chart creation. Has `create_visualization`, `get_data_summary`, `execute_python_code_fallback`.
-- **Forecast Agent:** Time-series predictions via Prophet. Has `execute_python_code_fallback` only.
-- **Cleaning Agent:** Data transformations (missing values, duplicates, types, filtering). Has `get_data_summary` + `execute_python_code_fallback`. Persists cleaned DataFrames via `final_df` variable capture.
+- **Query Enricher:** Stateless, single-shot Gemini API call. Rewrites queries into specific analytical prompts. Handles chat history for pronoun resolution.
+- **Orchestrator (CSV/Enterprise):** Analyzes intent, delegates to the correct sub-agent. `CSVOrchestrator` allows cleaning; `EnterpriseOrchestrator` uses `SQLAgent` for warehouse querying.
+- **Visual Analyst:** Stats analysis + chart creation. Has `create_visualization`, `get_data_summary`, `stats_tool`, `weighted_tool`.
+- **SQL Agent (Enterprise Mode Only):** Specialist for DuckDB/BigQuery. Uses `execute_structured_query` to fetch pre-aggregated data for the analyst.
+- **Forecast Agent:** Time-series predictions via Prophet. Has `execute_python_code_fallback`.
+- **Cleaning Agent (CSV Mode Only):** Data transformations (missing values, duplicates, types). Persists via `final_df`.
 
 ### Agent Configuration
 - Each agent is defined in `dataverse_agent/agents/<name>.py`
@@ -162,17 +165,23 @@ Four FunctionTools registered with ADK (exported as `TOOLS` list):
 2. **`get_data_summary()`**
    - Returns DataFrame info + first 5 rows as text
 
-3. **`create_table(table_code, title, subtitle)`**
-   - Executes Python code via sandbox; code **must** assign result to `display_df`
-   - Stores the resulting DataFrame in `_local.display_df` for interactive chat rendering
-   - Used for pivot tables, summaries, and any copyable tabular output
+3. **`execute_structured_query(table, columns, agg_columns, filters, having, ctes, joins, ...)`**
+   - Programmatically builds and executes SQL for DuckDB or BigQuery.
+   - Offloads complex aggregations and joins to the database warehouse.
+   - Results are stored in `viz_temp_df` for immediate graphing by the Visual Analyst.
 
-4. **`execute_python_code_fallback(code)`**
-   - Runs arbitrary Python through the sandbox (`models/sandbox.py`)
-   - Captures: printed output, matplotlib figures
-   - `viz_df` → stored as `_local.viz_temp_df` (temp scoped, never persisted)
-   - `final_df` → stored as `_local.final_df` (cleaning agent persistence)
-   - `display_df` → stored as `_local.display_df` (standalone table for chat)
+4. **`calculate_statistical_metric(column, group_by, metric_type)`**
+   - High-level tool for calculating z-scores, percentile ranks, or pct_change.
+   - Handles grouped calculations automatically without the agent writing raw pandas.
+
+5. **`calculate_weighted_metric(metric_col, weight_col, label)`**
+   - Specialized tool for weighted averages and revenue splits.
+
+6. **`execute_python_code_fallback(code)`**
+   - Runs arbitrary Python through the sandbox.
+   - `viz_df` → stored as `_local.viz_temp_df` (temp scoped).
+   - `final_df` → stored as `_local.final_df` (cleaning persistence).
+   - `display_df` → stored as `_local.display_df` (chat table).
 
 **Thread-local state management:**
 - `set_session_context(df)` — registers DataFrame + fresh figures list + clears `display_df` for current thread
@@ -234,9 +243,12 @@ sessions[sid] = {
 st.session_state.is_logged_in       # bool — admin auth state
 st.session_state.show_observability # bool — show activity trace (admin only)
 st.session_state.show_usage_budget  # bool — show budget panel (admin only)
-st.session_state.enterprise_mode    # bool — toggle between CSV upload and predefined DuckDB marts
+st.session_state.enterprise_mode    # bool — toggle between CSV upload and warehouse picker
+st.session_state.connector_type     # str  — "duckdb" | "bigquery"
+st.session_state.enterprise_table_id # str — current active table/view in warehouse
+st.session_state.enterprise_dataset_name # str — dataset/schema name
 st.session_state.max_budget_turns   # int — turn limit before blocking
-st.session_state.original_df        # DataFrame — immutable backup from initial upload (restore point)
+st.session_state.original_df        # DataFrame — immutable backup from initial upload
 ```
 
 ### `dataverse_agent/messages.py` — Chat Messages

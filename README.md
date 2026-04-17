@@ -42,7 +42,8 @@
 | Capability | What it does |
 |---|---|
 | 💬 **Chat with your data** | Ask questions in plain English — no SQL or code needed. Supports CSV, Excel, Parquet, JSON, and TSV. |
-| 🏢 **Enterprise Warehouse** | Instantly load predefined, cleaned data marts from a DuckDB/dbt warehouse. |
+| 🏢 **Enterprise Warehouse** | Instantly load predefined data from local DuckDB or Cloud BigQuery environments. |
+| 🗄️ **SQL Agent** | Specialist that writes and executes structured SQL for massive datasets in DuckDB/BigQuery. |
 | 📊 **Instant visualizations** | Generates bar, line, scatter, heatmap, forecast charts and more, directly in the chat. |
 | 🧹 **Auto data cleaning** | On upload, the agent automatically detects and fixes missing values, duplicates, and type issues. |
 | 🔮 **Time-series forecasting** | Predict future trends using Prophet with a simple natural language request. |
@@ -81,13 +82,13 @@ Any attempt to bypass these restrictions results in a `🛡️ Code blocked` ale
     │   └── dataverse/           ← dbt models, configuring pre-cleaned data marts and warehouse
     ├── dataverse_agent/
     │   ├── __init__.py
-    │   ├── agent.py             ← Main entry point for the Multi-Agent Orchestrator
+    │   ├── agent.py             ← Factory for CSV vs Enterprise Orchestrators
     │   ├── schemas.py           ← Centralized Pydantic models for type safety
     │   ├── errors.py            ← Error mitigation and user guidance logic
-    │   ├── agents/              ← Specialized sub-agents (Cleaning, Forecast, Visual Analyst, Enricher)
+    │   ├── agents/              ← Specialized agents (SQL, Forecast, Analyst, Cleaning)
     │   ├── prompts/             ← Specific instruction prompts for each agent
-    │   ├── messages.py          ← Centralized chat messages (intro, no-csv, session-resume)
-    │   └── tools.py             ← ADK FunctionTools for visualization and code execution
+    │   ├── messages.py          ← Centralized chat messages
+    │   └── tools.py             ← ADK FunctionTools for viz, SQL, and code execution
     ├── models/
     │   ├── __init__.py
     │   ├── duckdb_connector.py  ← Warehouse table registry and loader
