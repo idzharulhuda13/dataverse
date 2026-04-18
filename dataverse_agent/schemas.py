@@ -204,3 +204,67 @@ class InfographicContent(BaseModel):
     conclusion: str = "Further analysis recommended to uncover deeper trends."
     metrics: list[InfographicMetric] = Field(default_factory=list)
     calculated_metrics: list[CalculatedMetric] = Field(default_factory=list)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# SQL BUILDER
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+from typing import List, Union, Literal
+
+class FilterCondition(BaseModel):
+    """A single WHERE/HAVING clause condition."""
+    col: str = Field(..., description="The column name or raw expression.")
+    op: Literal["=", "!=", ">", "<", ">=", "<=", "LIKE", "ILIKE", "IN", "NOT IN", "BETWEEN", "IS", "IS NOT"] = Field(..., description="The operator.")
+    val: Any = Field(..., description="Value(s) to compare against.")
+    is_raw: bool = Field(False, description="If true, treat col/val as raw SQL snippets.")
+
+class FilterGroup(BaseModel):
+    """A recursive group of conditions joined by AND/OR."""
+    logic: Literal["AND", "OR"] = "AND"
+    conditions: List[Union[FilterCondition, FilterGroup]] = Field(..., description="List of conditions or nested groups.")
+
+class AggCondition(BaseModel):
+    """A SELECT aggregation."""
+    col: str = Field(..., description="The column name or raw expression.")
+    func: Literal["SUM", "AVG", "COUNT", "MIN", "MAX", "NUNIQUE"] = Field(..., description="Aggregation function.")
+    alias: Optional[str] = Field(None, description="Alias for the result.")
+    is_raw: bool = Field(False, description="If true, treat col as a raw SQL snippet.")
+
+class HavingCondition(BaseModel):
+    """A HAVING clause condition."""
+    col: str = Field(..., description="Alias or expression.")
+    op: Literal["=", "!=", ">", "<", ">=", "<="] = Field(..., description="Operator.")
+    val: Any = Field(..., description="Value.")
+
+class OrderBySpec(BaseModel):
+    """An ORDER BY specification."""
+    col: str = Field(..., description="Column or alias.")
+    dir: Literal["ASC", "DESC"] = "ASC"
+
+class CTESpec(BaseModel):
+    """A Common Table Expression."""
+    name: str = Field(..., description="CTE name.")
+    query: str = Field(..., description="Raw SQL query for the CTE.")
+
+class JoinCondition(BaseModel):
+    """A table join specification."""
+    table: str = Field(..., description="Table name to join.")
+    on: str = Field(..., description="Join condition (e.g. 'a.id = b.id').")
+    type: Literal["INNER", "LEFT", "RIGHT", "FULL"] = "INNER"
+    alias: Optional[str] = Field(None, description="Alias for joined table.")
+
+class WindowSpec(BaseModel):
+    """A Window Function specification."""
+    func: str = Field(..., description="Function name (e.g. 'ROW_NUMBER', 'RANK', 'SUM').")
+    col: Optional[str] = Field(None, description="Column to apply function to (if applicable).")
+    partition_by: Optional[List[str]] = Field(None, description="Columns to partition by.")
+    order_by: Optional[List[OrderBySpec]] = Field(None, description="Columns to order by within window.")
+    alias: str = Field(..., description="Alias for the resulting window column.")
+    is_raw: bool = Field(False, description="If true, treat col/func as raw SQL snippets.")
+
+class CaseSpec(BaseModel):
+    """A CASE statement specification."""
+    when_then: List[dict[str, Any]] = Field(..., description="List of {'when': 'cond', 'then': val} pairs.")
+    else_val: Any = Field(None, description="Value for the ELSE clause.")
+    alias: str = Field(..., description="Alias for the case column.")

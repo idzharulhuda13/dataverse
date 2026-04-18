@@ -7,14 +7,17 @@ def build_sql(
     table: str,
     db_type: Literal['duckdb', 'bigquery'],
     columns: List[str] = None,
-    agg_columns: List[Dict[str, str]] = None,
-    filters: List[Dict[str, Any]] = None,
+    agg_columns: List[Dict[str, Any]] = None,
+    filters: Any = None,
     group_by: List[str] = None,
     order_by: List[Dict[str, str]] = None,
     having: List[Dict[str, Any]] = None,
     ctes: List[Dict[str, str]] = None,
     joins: List[Dict[str, Any]] = None,
-    limit: Optional[int] = None
+    window_functions: List[Dict[str, Any]] = None,
+    case_statements: List[Dict[str, Any]] = None,
+    limit: Optional[int] = None,
+    distinct: bool = False
 ) -> str:
     """
     Constructs a SQL SELECT statement from structured parameters.
@@ -34,23 +37,53 @@ def build_sql(
     """
     quote = '`' if db_type == 'bigquery' else '"'
     
-    def quote_identifier(name: str) -> str:
-        """Helper to quote names but preserve aliases and dots."""
-        if not name or name == "*": return "*"
+    def quote_identifier(name: str, is_raw: bool = False) -> str:
+        """Helper to quote names but preserve aliases and dots. If is_raw, returns as is."""
+        if is_raw or not name or name == "*": return name
         
-        # Handle aliases: "table AS t" -> "table" AS "t" (case insensitive detection)
+        # Handle aliases: "table AS t" -> "table" AS "t"
         import re
         if re.search(r"\s+AS\s+", name, re.IGNORECASE):
             parts = re.split(r"\s+AS\s+", name, flags=re.IGNORECASE)
             return f"{quote_identifier(parts[0].strip())} AS {quote}{parts[1].strip()}{quote}"
             
         # Handle Dots: "schema.table" -> "schema"."table"
-        if "." in name and db_type != 'bigquery':
+        if "." in name:
+            if db_type == 'bigquery':
+                return f"`{name}`"
             return ".".join([f"{quote}{p}{quote}" for p in name.split(".")])
-        # BigQuery backticks for the whole name if it contains dots
-        if "." in name and db_type == 'bigquery':
-            return f"`{name}`"
+            
         return f"{quote}{name}{quote}"
+
+    def format_val(val: Any) -> str:
+        if isinstance(val, str): return f"'{val}'"
+        if isinstance(val, bool): return str(val).upper()
+        if val is None: return "NULL"
+        if isinstance(val, (list, tuple)):
+            return "(" + ", ".join([format_val(v) for v in val]) + ")"
+        return str(val)
+
+    def render_condition(f: Dict[str, Any]) -> str:
+        """Recursively renders a filter group or a single condition."""
+        if "logic" in f:
+            logic = f.get("logic", "AND").upper()
+            parts = [render_condition(c) for c in f.get("conditions", [])]
+            if not parts: return ""
+            return f"({f' {logic} '.join(parts)})"
+        
+        col = f['col']
+        op = f['op'].upper()
+        val = f['val']
+        is_raw = f.get('is_raw', False)
+        
+        # Dialect specific adjustments
+        if op == "=" and val is None: op = "IS"
+        if op == "!=" and val is None: op = "IS NOT"
+        
+        col_expr = quote_identifier(col, is_raw)
+        val_expr = format_val(val) if not is_raw else str(val)
+        
+        return f"{col_expr} {op} {val_expr}"
 
     # ── 1. WITH clause (CTEs) ────────────────────────────────────────────────
     cte_clause = ""
@@ -75,13 +108,50 @@ def build_sql(
         for agg in agg_columns:
             col = agg['col']
             func = agg['func']
+            is_raw = agg.get('is_raw', False)
             alias = agg.get('alias', f"{func.lower()}_{col}")
-            select_parts.append(f"{func}({quote_identifier(col)}) AS {quote_identifier(alias)}")
+            select_parts.append(f"{func}({quote_identifier(col, is_raw)}) AS {quote_identifier(alias)}")
+
+    # Window Functions
+    if window_functions:
+        for w in window_functions:
+            func = w['func']
+            col = w.get('col')
+            p_by = w.get('partition_by')
+            o_by = w.get('order_by')
+            alias = w['alias']
+            is_raw = w.get('is_raw', False)
+            
+            w_col = quote_identifier(col, is_raw) if col else ""
+            w_part = f"PARTITION BY {', '.join([quote_identifier(p) for p in p_by])}" if p_by else ""
+            
+            w_ord = ""
+            if o_by:
+                ord_parts = [f"{quote_identifier(o['col'])} {o.get('dir', 'ASC')}" for o in o_by]
+                w_ord = f"ORDER BY {', '.join(ord_parts)}"
+                
+            over_clause = f"{w_part} {w_ord}".strip()
+            select_parts.append(f"{func}({w_col}) OVER ({over_clause}) AS {quote_identifier(alias)}")
+
+    # Case Statements
+    if case_statements:
+        for cs in case_statements:
+            w_t = cs['when_then']
+            else_v = cs.get('else_val')
+            alias = cs['alias']
+            
+            case_parts = ["CASE"]
+            for pair in w_t:
+                case_parts.append(f"WHEN {pair['when']} THEN {format_val(pair['then'])}")
+            if else_v is not None:
+                case_parts.append(f"ELSE {format_val(else_v)}")
+            case_parts.append(f"END AS {quote_identifier(alias)}")
+            select_parts.append(" ".join(case_parts))
             
     if not select_parts:
-        select_clause = "SELECT *"
+        select_clause = "SELECT DISTINCT *" if distinct else "SELECT *"
     else:
-        select_clause = f"SELECT {', '.join(select_parts)}"
+        select_clause = f"SELECT {'DISTINCT ' if distinct else ''}{', '.join(select_parts)}"
         
     # ── 3. FROM clause ───────────────────────────────────────────────────────
     from_clause = f"FROM {quote_identifier(table)}"
@@ -103,24 +173,13 @@ def build_sql(
     # ── 5. WHERE clause ──────────────────────────────────────────────────────
     where_clause = ""
     if filters:
-        filter_parts = []
-        for f in filters:
-            col = f['col']
-            op = f['op']
-            val = f['val']
-            
-            if isinstance(val, str):
-                formatted_val = f"'{val}'"
-            elif isinstance(val, bool):
-                formatted_val = str(val).upper()
-            elif val is None:
-                op = 'IS' if op == '=' else 'IS NOT'
-                formatted_val = 'NULL'
-            else:
-                formatted_val = str(val)
-                
-            filter_parts.append(f"{quote_identifier(col)} {op} {formatted_val}")
-        where_clause = f"WHERE {' AND '.join(filter_parts)}"
+        if isinstance(filters, list):
+            # Legacy/Simple list (implicit AND)
+            filter_parts = [render_condition(f) for f in filters]
+            where_clause = f"WHERE {' AND '.join(filter_parts)}"
+        else:
+            # Recursive FilterGroup
+            where_clause = f"WHERE {render_condition(filters)}"
         
     # ── 6. GROUP BY clause ───────────────────────────────────────────────────
     group_clause = ""
