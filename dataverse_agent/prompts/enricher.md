@@ -149,13 +149,13 @@ If the header `[WAREHOUSE_MODE]: ACTIVE` is present in the context:
 - You are dealing with a HUGE dataset (millions of rows).
 - **CRITICAL**: You MUST NOT request complex Python transformations in the rewritten prompt.
 - **ACTION**: You MUST prepend `[SQL_REQUIRED]` to the output.
-- **SOURCE**: Use the provided `[TABLE_ID]` and `[DB_SCHEMA]` to specify the data source.
-- **OBJECTIVE**: Clearly state what aggregations, dimensions, and filters the SQL Agent should fetch.
+- **SOURCE**: Use `[FULL_TABLE_ID]` as the exact table reference, NOT just `[TABLE_ID]`. The `[FULL_TABLE_ID]` is the schema-qualified name (e.g., `main_chocolate_sales_mrt.mrt_sales`) required for the SQL agent to query without guessing.
+- **OBJECTIVE**: Clearly state what aggregations, dimensions, and filters the SQL Agent should fetch, and reference the exact `[FULL_TABLE_ID]`.
 
 **Input (Warehouse Mode):** "What was the total revenue per month in 2023?"
-**Context:** `[WAREHOUSE_MODE]: ACTIVE`, `[TABLE_ID]: mrt_sales`, `[DB_SCHEMA]: main`
-**Output:** [SQL_REQUIRED] [SOURCE: main.mrt_sales] Fetch the sum of `revenue` grouped by month for the year 2023.
+**Context:** `[WAREHOUSE_MODE]: ACTIVE`, `[FULL_TABLE_ID]: main_chocolate_sales_mrt.mrt_sales`
+**Output:** [SQL_REQUIRED] [SOURCE: main_chocolate_sales_mrt.mrt_sales] Fetch the sum of `revenue` grouped by month for the year 2023.
 
 **Input (Warehouse Mode):** "Show me the top 5 programming languages by repository count"
-**Context:** `[WAREHOUSE_MODE]: ACTIVE`, `[TABLE_ID]: languages`, `[DB_SCHEMA]: bigquery-public-data.github_repos`
+**Context:** `[WAREHOUSE_MODE]: ACTIVE`, `[FULL_TABLE_ID]: bigquery-public-data.github_repos.languages`
 **Output:** [SQL_REQUIRED] [SOURCE: bigquery-public-data.github_repos.languages] Fetch the count of repositories grouped by `language`, ordered by count descending, limited to the top 5.

@@ -88,7 +88,15 @@ def enrich_query(
     dataset_label = f"Dataset name: {dataset_name}\n" if dataset_name else ""
     warehouse_label = ""
     if is_warehouse:
-        warehouse_label = f"[WAREHOUSE_MODE]: ACTIVE\n[TABLE_ID]: {table_id}\n[DB_SCHEMA]: {db_schema}\n"
+        # Build the fully-qualified table name directly so the SQL agent never guesses
+        fq_table = f"{db_schema}.{table_id}" if db_schema and table_id else table_id
+        warehouse_label = (
+            f"[WAREHOUSE_MODE]: ACTIVE\n"
+            f"[TABLE_ID]: {table_id}\n"
+            f"[DB_SCHEMA]: {db_schema}\n"
+            f"[FULL_TABLE_ID]: {fq_table}\n"
+            "Use [FULL_TABLE_ID] as the exact table name in all SQL queries.\n"
+        )
         
     user_prompt = (
         f"{history_context}"
@@ -115,7 +123,11 @@ def enrich_query(
         total_token_count=response.usage_metadata.total_token_count,
     )
 
+    # Safely extract text from all parts to avoid "non-text parts" warning
+    text_parts = [p.text for p in response.candidates[0].content.parts if p.text]
+    enriched_query = "".join(text_parts).strip()
+
     return EnricherResult(
-        enriched_query=response.text.strip(),
+        enriched_query=enriched_query,
         usage=usage,
     )
