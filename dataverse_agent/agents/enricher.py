@@ -113,7 +113,7 @@ def enrich_query(
         contents=user_prompt,
         config=types.GenerateContentConfig(
             system_instruction=_ENRICHER_SYSTEM_PROMPT,
-            temperature=0.0,
+            temperature=0.7,
         ),
     )
 

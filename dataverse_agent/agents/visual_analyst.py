@@ -15,7 +15,7 @@ def get_visual_analyst_agent() -> Agent:
     """Returns a fresh instance of the Visual Analyst Agent."""
     return Agent(
         model=os.getenv('GEMINI_MODEL', 'gemini-3.1-flash-lite-preview'),
-        generate_content_config=types.GenerateContentConfig(temperature=0.2),
+        generate_content_config=types.GenerateContentConfig(temperature=0.7),
         name='visual_analyst_agent',
         description=(
             'The primary data exploration agent. Analyzes data AND creates premium '
