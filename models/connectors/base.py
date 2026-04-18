@@ -17,8 +17,8 @@ class BaseConnector(ABC):
         pass
 
     @abstractmethod
-    def load_table(self, table_id: str) -> pd.DataFrame:
-        """Load a specific table into a Pandas DataFrame."""
+    def load_table(self, table_id: str, limit: Optional[int] = None) -> pd.DataFrame:
+        """Load a specific table into a Pandas DataFrame, with optional limit."""
         pass
 
     @abstractmethod

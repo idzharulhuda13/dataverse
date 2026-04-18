@@ -86,7 +86,7 @@ class BigQueryConnector(BaseConnector):
         """Return registered BigQuery tables."""
         return list(BQ_TABLE_REGISTRY.values())
 
-    def load_table(self, table_id: str) -> pd.DataFrame:
+    def load_table(self, table_id: str, limit: Optional[int] = None) -> pd.DataFrame:
         """
         In BigQuery mode, we return a sample for grounding.
         """
@@ -95,7 +95,8 @@ class BigQueryConnector(BaseConnector):
         
         meta = BQ_TABLE_REGISTRY[table_id]
         # Using a preview for grounding
-        query = f"SELECT * FROM `{meta.db_schema}.{table_id}` LIMIT 100"
+        limit_val = limit if limit is not None else 100
+        query = f"SELECT * FROM `{meta.db_schema}.{table_id}` LIMIT {limit_val}"
         return self.execute_query(query)
 
     def execute_query(self, query: str) -> pd.DataFrame:
@@ -116,7 +117,7 @@ def ensure_dataframe_is_arrow_compatible(df: pd.DataFrame) -> pd.DataFrame:
             try:
                 # Try to cast to datetime if it looks like one
                 if df[col].astype(str).str.contains("-").any():
-                    df[col] = pd.to_datetime(df[col], errors='ignore')
+                    df[col] = pd.to_datetime(df[col], format='mixed', errors='coerce')
             except:
                 pass
     return df

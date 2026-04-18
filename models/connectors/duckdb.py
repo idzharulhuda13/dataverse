@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 import duckdb
 import pandas as pd
 from dataverse_agent.schemas import TableRegistryEntry
@@ -77,7 +77,7 @@ class DuckDBConnector(BaseConnector):
         """Return all registered tables as a list of TableRegistryEntry models."""
         return list(TABLE_REGISTRY.values())
 
-    def load_table(self, table_id: str) -> pd.DataFrame:
+    def load_table(self, table_id: str, limit: Optional[int] = None) -> pd.DataFrame:
         """Load a registered table from the DuckDB warehouse into a DataFrame."""
         if table_id not in TABLE_REGISTRY:
             raise ValueError(
@@ -92,7 +92,8 @@ class DuckDBConnector(BaseConnector):
         meta = TABLE_REGISTRY[table_id]
         con = duckdb.connect(str(WAREHOUSE_PATH), read_only=True)
         try:
-            df = con.execute(f"SELECT * FROM {meta.db_schema}.{table_id}").df()
+            limit_clause = f" LIMIT {limit}" if limit else ""
+            df = con.execute(f"SELECT * FROM {meta.db_schema}.{table_id}{limit_clause}").df()
             return ensure_dataframe_is_arrow_compatible(df)
         finally:
             con.close()
@@ -117,7 +118,7 @@ def ensure_dataframe_is_arrow_compatible(df: pd.DataFrame) -> pd.DataFrame:
             try:
                 # Try to cast to datetime if it looks like one
                 if df[col].astype(str).str.contains("-").any():
-                    df[col] = pd.to_datetime(df[col], errors='ignore')
+                    df[col] = pd.to_datetime(df[col], format='mixed', errors='coerce')
             except:
                 pass
     return df
