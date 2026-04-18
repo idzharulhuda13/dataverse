@@ -758,8 +758,11 @@ def execute_python_code_fallback(code: str) -> str:
     df = _get_df()
     if df is None:
         return "Error: No dataset loaded."
-        
-    result = safe_execute(code, df)
+
+    # Pass viz_temp_df into sandbox so Visual Analyst code can reference it directly.
+    # This eliminates the NameError-→-get_data_summary-→-bounce cycle.
+    viz_temp = getattr(_local, "viz_temp_df", None)
+    result = safe_execute(code, df, viz_temp_df=viz_temp)
     
     if result.blocked:
         return f"Code blocked: {result.blocked_reason}"
@@ -805,12 +808,13 @@ def create_table(table_code: str, title: str = None, subtitle: str = None) -> st
     df = _get_df()
     if df is None:
         return "Error: No dataset loaded."
-        
+
     # Ensure the code assigns to display_df for the sandbox to capture it correctly
     if "display_df =" not in table_code:
         table_code = f"display_df = {table_code}"
-        
-    result = safe_execute(table_code, df)
+
+    viz_temp = getattr(_local, "viz_temp_df", None)
+    result = safe_execute(table_code, df, viz_temp_df=viz_temp)
     
     if result.blocked:
         return f"Table creation blocked: {result.blocked_reason}"
@@ -892,30 +896,10 @@ def calculate_statistical_metric(column: str, group_by: str = None, metric_type:
     except Exception as e:
         return f"Error calculating statistic: {str(e)}"
 
-class FilterCondition(BaseModel):
-    col: str = Field(..., description="The column name to filter on.")
-    op: Literal["=", "!=", ">", "<", ">=", "<="] = Field(..., description="The comparison operator.")
-    val: Any = Field(..., description="The value to compare against.")
-
-class AggCondition(BaseModel):
-    col: str = Field(..., description="The column name to aggregate.")
-    func: Literal["SUM", "AVG", "COUNT", "MIN", "MAX"] = Field(..., description="The aggregation function (e.g. SUM, AVG).")
-    alias: Optional[str] = Field(None, description="Optional alias for the resulting column.")
-
-class HavingCondition(BaseModel):
-    col: str = Field(..., description="The column or alias to filter in HAVING (e.g. total_revenue).")
-    op: Literal["=", "!=", ">", "<", ">=", "<="] = Field(..., description="The comparison operator.")
-    val: Any = Field(..., description="The value to compare against.")
-
-class CTESpec(BaseModel):
-    name: str = Field(..., description="The name of the CTE.")
-    query: str = Field(..., description="The raw SQL query for the CTE.")
-
-class JoinCondition(BaseModel):
-    table: str = Field(..., description="Table to join.")
-    on: str = Field(..., description="Join condition (e.g. 'a.id = b.id').")
-    type: Literal["INNER", "LEFT", "RIGHT", "FULL"] = Field("INNER", description="Type of join.")
-    alias: Optional[str] = Field(None, description="Alias for the joined table.")
+from dataverse_agent.schemas import (
+    FilterCondition, FilterGroup, AggCondition, HavingCondition, 
+    CTESpec, JoinCondition, WindowSpec, CaseSpec, OrderBySpec
+)
 
 @error_guardrail(context="Database")
 def execute_structured_query(
@@ -926,29 +910,36 @@ def execute_structured_query(
     having: List[Any] = None,
     ctes: List[Any] = None,
     joins: List[Any] = None,
+    window_functions: List[Any] = None,
+    case_statements: List[Any] = None,
     group_by: List[str] = None,
     order_by: List[Any] = None,
-    limit: Optional[int] = None
+    limit: Optional[int] = None,
+    distinct: bool = False
 ) -> str:
     """Execute a structured database query and load results into the sandbox.
     
     This tool programmatically builds a SQL query based on the parameters provided, 
     ensuring syntax correctness for the active database (DuckDB or BigQuery).
     
-    The resulting DataFrame is assigned to `viz_temp_df` in the sandbox, making it
-    immediately available for the Visual Analyst to use for charting.
+    Examples:
+        - window_functions: [{'func': 'RANK', 'order_by': [{'col': 'rev', 'dir': 'DESC'}], 'alias': 'rk'}]
+        - filters (nested): {'logic': 'OR', 'conditions': [{'col': 'a', 'op': '=', 'val': 1}, {'col': 'b', 'op': '>', 'val': 2}]}
     
     Args:
         table: The table name or identifier (can include alias 'table AS t').
         columns: Optional list of raw columns to select (dimensions).
         agg_columns: Optional list of aggregations (e.g. [{'col': 'rev', 'func': 'SUM'}]).
-        filters: Optional list of WHERE filters.
+        filters: Optional list of conditions or a single FilterGroup dict.
         having: Optional list of HAVING filters.
-        ctes: Optional list of Common Table Expressions (raw SQL).
-        joins: Optional list of table joins (e.g. [{'table': 'other', 'on': 'a.id = b.id'}]).
+        ctes: Optional list of Common Table Expressions.
+        joins: Optional list of table joins.
+        window_functions: Optional list of analytical/window functions.
+        case_statements: Optional list of conditional CASE statements.
         group_by: Optional list of columns to group by.
         order_by: Optional list of order specifications.
         limit: Max rows to return.
+        distinct: If True, returns unique rows only.
     """
     from models.connectors import get_active_connector
     from models.query_builder import build_sql
@@ -959,59 +950,49 @@ def execute_structured_query(
         # Determine dialect
         db_type = st.session_state.get("connector_type", "duckdb")
         
-        # Manually validate dicts into models to handle ADK's complex schema limitation
-        agg_dicts = []
-        if agg_columns:
-            for item in agg_columns:
+        # Helper to validate models from dictionaries
+        def validate_list(items, model):
+            if not items: return None
+            parsed = []
+            for item in items:
                 if hasattr(item, "model_dump"):
-                    agg_dicts.append(item.model_dump())
+                    parsed.append(item.model_dump())
                 else:
-                    agg_dicts.append(AggCondition.model_validate(item).model_dump())
-                    
-        filter_dicts = []
+                    parsed.append(model.model_validate(item).model_dump())
+            return parsed
+
+        agg_dicts = validate_list(agg_columns, AggCondition)
+        having_dicts = validate_list(having, HavingCondition)
+        cte_dicts = validate_list(ctes, CTESpec)
+        join_dicts = validate_list(joins, JoinCondition)
+        window_dicts = validate_list(window_functions, WindowSpec)
+        case_dicts = validate_list(case_statements, CaseSpec)
+        
+        # filters can be a list of conditions (implicit AND) or a single FilterGroup dict
+        filter_data = None
         if filters:
-            for item in filters:
-                if hasattr(item, "model_dump"):
-                    filter_dicts.append(item.model_dump())
-                else:
-                    filter_dicts.append(FilterCondition.model_validate(item).model_dump())
+            if isinstance(filters, dict) and "logic" in filters:
+                filter_data = FilterGroup.model_validate(filters).model_dump()
+            else:
+                filter_data = validate_list(filters, FilterCondition)
 
-        having_dicts = []
-        if having:
-            for item in having:
-                if hasattr(item, "model_dump"):
-                    having_dicts.append(item.model_dump())
-                else:
-                    having_dicts.append(HavingCondition.model_validate(item).model_dump())
-
-        cte_dicts = []
-        if ctes:
-            for item in ctes:
-                if hasattr(item, "model_dump"):
-                    cte_dicts.append(item.model_dump())
-                else:
-                    cte_dicts.append(CTESpec.model_validate(item).model_dump())
-
-        join_dicts = []
-        if joins:
-            for item in joins:
-                if hasattr(item, "model_dump"):
-                    join_dicts.append(item.model_dump())
-                else:
-                    join_dicts.append(JoinCondition.model_validate(item).model_dump())
+        order_dicts = validate_list(order_by, OrderBySpec)
         
         sql = build_sql(
             table=table,
             db_type=db_type,
             columns=columns,
-            agg_columns=agg_dicts or None,
-            filters=filter_dicts or None,
-            having=having_dicts or None,
-            ctes=cte_dicts or None,
-            joins=join_dicts or None,
+            agg_columns=agg_dicts,
+            filters=filter_data,
+            having=having_dicts,
+            ctes=cte_dicts,
+            joins=join_dicts,
+            window_functions=window_dicts,
+            case_statements=case_dicts,
             group_by=group_by,
-            order_by=order_by,
-            limit=limit
+            order_by=order_dicts,
+            limit=limit,
+            distinct=distinct
         )
         
         df = connector.execute_query(sql)

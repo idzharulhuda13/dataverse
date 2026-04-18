@@ -209,12 +209,16 @@ def _build_safe_builtins() -> dict:
     return safe
 
 
-def _build_exec_namespace(df: pd.DataFrame) -> dict:
+def _build_exec_namespace(df: pd.DataFrame, viz_temp_df: pd.DataFrame = None) -> dict:
     """
     Build the restricted globals dict for exec().
+
+    If viz_temp_df is provided (i.e., the SQL agent has already fetched results),
+    it is injected under its canonical name so Visual Analyst code can use it
+    directly without a NameError bounce.
     """
-    return {
-        # Data
+    ns = {
+        # Data — primary session dataset
         "df": df.copy(),
         # Libraries
         "pd": pd,
@@ -224,6 +228,10 @@ def _build_exec_namespace(df: pd.DataFrame) -> dict:
         # Restricted builtins
         "__builtins__": _build_safe_builtins(),
     }
+    # Inject SQL agent result if available so Visual Analyst can use viz_temp_df directly
+    if viz_temp_df is not None:
+        ns["viz_temp_df"] = viz_temp_df.copy()
+    return ns
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -271,6 +279,7 @@ def safe_execute(
     code: str,
     df: pd.DataFrame,
     timeout: int = DEFAULT_TIMEOUT,
+    viz_temp_df: pd.DataFrame = None,
 ) -> SandboxResult:
     """
     Validate and execute LLM-generated Python code in a sandboxed environment.
@@ -285,6 +294,8 @@ def safe_execute(
         code: Python source code to execute.
         df: The DataFrame to make available as `df` in the code.
         timeout: Maximum execution time in seconds (default: 30).
+        viz_temp_df: Optional SQL-fetched DataFrame to inject as `viz_temp_df`
+                     so Visual Analyst code can reference it without a NameError.
 
     Returns:
         SandboxResult with execution results or error/block information.
@@ -302,7 +313,7 @@ def safe_execute(
     plt.close("all")
 
     # ── Layer 3: Build restricted namespace ──────────────────────────────
-    exec_globals = _build_exec_namespace(df)
+    exec_globals = _build_exec_namespace(df, viz_temp_df=viz_temp_df)
 
     try:
         # Redirect stdout to capture print output

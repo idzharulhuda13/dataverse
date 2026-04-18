@@ -7,6 +7,7 @@ a visualization alongside its analysis — never returns text-only.
 import os
 
 from google.adk.agents import Agent
+from google.genai import types
 from dataverse_agent.tools import viz_tool, summary_tool, fallback_tool, table_tool, stats_tool, weighted_tool
 from dataverse_agent.prompts import load_prompt
 
@@ -14,6 +15,7 @@ def get_visual_analyst_agent() -> Agent:
     """Returns a fresh instance of the Visual Analyst Agent."""
     return Agent(
         model=os.getenv('GEMINI_MODEL', 'gemini-3.1-flash-lite-preview'),
+        generate_content_config=types.GenerateContentConfig(temperature=0.2),
         name='visual_analyst_agent',
         description=(
             'The primary data exploration agent. Analyzes data AND creates premium '
