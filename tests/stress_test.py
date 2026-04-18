@@ -90,36 +90,36 @@ class TestQuestion:
     checks: list[str] = field(default_factory=list)  # What to verify in the output
 
 
-# Default questions targeting the Chocolate Sales (mrt_sales) dataset
+# Elite Questions targeting the SQL Analytics Warehouse (mrt_sales)
 STRESS_TEST_QUESTIONS: list[TestQuestion] = [
     TestQuestion(
-        id="H1",
-        question="Analyze store profitability. Use the column that best represents the 'bottom line' profit margin, but only for stores that are in the 'Top 50%' of revenue generators. Show this as a ranked bar chart with mean profit margin labeled.",
-        expected_chart_type="bar",
-        checks=["chart_generated", "dataset_intact"],
-    ),
-    TestQuestion(
-        id="H2",
-        question="Identify 'Dead Brands'—brands that had revenue in the first 3 months of the dataset (June-August 2024) but zero revenue in the last available month (December 2024). Visualize the historical monthly revenue trend for these specific brands as a line chart.",
+        id="E1",
+        question="Rank categories by Month-over-Month (MoM) growth in revenue. Identify the top growing category for the most recent month and visualize its revenue trend against the overall category average as a line chart.",
         expected_chart_type="line",
         checks=["chart_generated", "dataset_intact"],
     ),
     TestQuestion(
-        id="H3",
-        question="A data entry error caused some 'discount' values greater than 0.5 to be recorded as text (e.g., '60% OFF') in the 'discount_label' column while 'discount' shows 0. Calculate the 'True Net Revenue' (Revenue - (Revenue * Correct Discount)) by reconciling both columns. Show the top 5 brands by True Net Revenue in a bar chart.",
+        id="E2",
+        question="Cohort Analysis: Segment stores into 4 quartiles based on their total 2024 revenue. For the 'Top Quartile', calculate and compare the average revenue per unit against the 'Bottom Quartile' using a bar chart.",
         expected_chart_type="bar",
         checks=["chart_generated", "dataset_intact"],
     ),
     TestQuestion(
-        id="H4",
-        question="Identify 'Efficiency Leaders': Brands where the average `revenue_per_unit` is a statistical outlier (Z-score > 1.5). For these leaders, visualize their monthly revenue trend over the entire period to check for consistency.",
-        expected_chart_type="line",
+        id="E3",
+        question="Calculate a 7-day rolling average of profit for all brands that have 'Lindt' in their name. Visualize any days where the actual profit exceeded the rolling average by more than 20% as a scatter chart.",
+        expected_chart_type="scatter",
         checks=["chart_generated", "dataset_intact"],
     ),
     TestQuestion(
-        id="H5",
-        question="Compare 'Weekend Warrior' brands (those with the highest revenue share on weekends) against 'Weekday Staples'. Generate a slope chart comparing the average daily revenue share between 'Weekend' and 'Weekday' for the top 5 brands with the highest weekend share.",
-        expected_chart_type="slope",
+        id="E4",
+        question="Pareto Analysis: Identify the 'Core Brands' that contribute to the top 80% of total revenue. For these core brands, visualize their share of total profit as a pie chart.",
+        expected_chart_type="pie",
+        checks=["chart_generated", "dataset_intact"],
+    ),
+    TestQuestion(
+        id="E5",
+        question="Statistical Volatility: Identify 'High-Variance Brands' where the standard deviation of monthly revenue is greater than twice the mean monthly revenue. Show their monthly revenue trend as a line chart.",
+        expected_chart_type="line",
         checks=["chart_generated", "dataset_intact"],
     ),
 ]
@@ -183,18 +183,22 @@ class StressTestRunner:
         # Suppress verbose ADK framework logging
         logging.getLogger("google.adk").setLevel(logging.ERROR)
 
-        # Load dataset
+        # Zero-Copy Initialization: For DuckDB, only load a small sample to simulate warehouse mode
         print(f"📂 Loading dataset: {self.dataset_path}")
         if self.dataset_path.suffix.lower() == ".duckdb":
-            print(f"   🗄️ DuckDB Warehouse detected. Loading '{CONFIG.duckdb_table_name}'...")
+            print(f"   🗄️ DuckDB Warehouse detected [ZERO-COPY MODE].")
             connector = DuckDBConnector()
-            self.original_df = connector.load_table(CONFIG.duckdb_table_name)
+            # Still load a tiny sample for schema grounding, but skip the 250k rows
+            self.original_df = connector.load_table(CONFIG.duckdb_table_name, limit=5)
+            self.is_warehouse = True
         else:
             with open(self.dataset_path, "rb") as f:
                 self.original_df, error = load_dataframe(f)
             if error:
                 raise RuntimeError(f"Failed to load dataset: {error}")
-        print(f"   ✅ Loaded: {len(self.original_df)} rows × {len(self.original_df.columns)} columns")
+            self.is_warehouse = False
+
+        print(f"   ✅ Context Ready: {len(self.original_df)} rows cached for grounding.")
         print(f"   Columns: {list(self.original_df.columns)}")
 
         # Working copy (simulates st.session_state.modified_df)
@@ -202,10 +206,9 @@ class StressTestRunner:
 
         # Initialize ADK Runner
         self.session_service = InMemorySessionService()
-        is_enterprise = self.dataset_path.suffix.lower() == ".duckdb"
         self.runner = Runner(
             app_name="dataverse_stress_test",
-            agent=get_orchestrator(is_enterprise),
+            agent=get_orchestrator(self.is_warehouse),
             session_service=self.session_service,
             auto_create_session=True,
         )
@@ -433,8 +436,17 @@ class StressTestRunner:
             # 2. Enrich the query
             print(f"   ✨ Enriching query...")
             from dataverse_agent.agents.enricher import enrich_query
+            from models.connectors.duckdb import TABLE_REGISTRY
             try:
-                enrich_result = enrich_query(question.question, self.working_df)
+                # Look up the fully-qualified schema from the registry — no guessing needed
+                table_meta = TABLE_REGISTRY.get(CONFIG.duckdb_table_name) if self.is_warehouse else None
+                enrich_result = enrich_query(
+                    question.question, 
+                    self.working_df,
+                    is_warehouse=self.is_warehouse,
+                    table_id=CONFIG.duckdb_table_name if self.is_warehouse else None,
+                    db_schema=table_meta.db_schema if table_meta else None,
+                )
                 enriched_question = enrich_result.enriched_query
                 result.enriched_question = enriched_question
                 print(f"      Enriched: {enriched_question}")
