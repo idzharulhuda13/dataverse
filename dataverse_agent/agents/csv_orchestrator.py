@@ -4,6 +4,7 @@ CSV Orchestrator Agent — Routes ad-hoc CSV exploration requests to specialists
 import os
 
 from google.adk.agents import Agent
+from google.genai import types
 from dataverse_agent.agents.visual_analyst import get_visual_analyst_agent
 from dataverse_agent.agents.forecast import get_forecast_agent
 from dataverse_agent.agents.cleaning import get_cleaning_agent
@@ -14,6 +15,7 @@ def get_csv_orchestrator() -> Agent:
     """Returns a fresh instance of the CSV Orchestrator."""
     return Agent(
         model=os.getenv('GEMINI_MODEL', 'gemini-3.1-flash-lite-preview'),
+        generate_content_config=types.GenerateContentConfig(temperature=0.2),
         name='csv_orchestrator',
         description=(
             'The primary analyst for ad-hoc CSV exploration, cleaning, and visualization. '

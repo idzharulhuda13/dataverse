@@ -4,6 +4,7 @@ Enterprise Orchestrator Agent — Routes warehouse data requests to specialists.
 import os
 
 from google.adk.agents import Agent
+from google.genai import types
 from dataverse_agent.agents.sql_agent import get_sql_agent
 from dataverse_agent.agents.visual_analyst import get_visual_analyst_agent
 from dataverse_agent.agents.forecast import get_forecast_agent
@@ -14,6 +15,7 @@ def get_enterprise_orchestrator() -> Agent:
     """Returns a fresh instance of the Enterprise Orchestrator."""
     return Agent(
         model=os.getenv('GEMINI_MODEL', 'gemini-3.1-flash-lite-preview'),
+        generate_content_config=types.GenerateContentConfig(temperature=0.2),
         name='enterprise_orchestrator',
         description=(
             'The senior analyst for integrated enterprise data. Handles SQL querying, '
